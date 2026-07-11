@@ -115,34 +115,44 @@ void kernel_start(void) {
 }
 
 /* DAY 8 Queue Functions (Unchanged) */
-void kernel_queue_init(RingQueue_t *q) {
+void kernel_queue_init(RingQueue_t *q,, uint8_t *buf, uint16_t cap){
+    CRITICAL_SECTION_ENTER();
+    q->buffer = buf;
+    q->capacity = cap;
     q->head = 0;
     q->tail = 0;
+    q->count = 0;
     q->overflow_flag = 0;
+    CRITICAL_SECTION_EXIT();
 }
 
 uint8_t kernel_queue_push(RingQueue_t *q, uint8_t data) {
     CRITICAL_SECTION_ENTER();
-    uint16_t next_tail = (q->tail + 1) % QUEUE_MAX_SIZE;
-    if (next_tail == q->head) {
-        q->overflow_flag = 1; 
-        CRITICAL_SECTION_EXIT();
-        return 1;              
+    /* Fixed overflow check utilizing full capacity without wasting a slot */
+    if (q->count == q->capacity) {
+        q->overflow_flag = 1;
+        EXIT_CRITICAL(primask);         // restores exactly the previous state (nesting-safe)
+        return 0; 
     }
+
     q->buffer[q->tail] = data;
-    q->tail = next_tail;
+    q->tail = (q->tail + 1) % q->capacity; /* Dynamic wrap-around based on queue capacity */
+    q->count++;
     CRITICAL_SECTION_EXIT();
     return 0; 
 }
 
 uint8_t kernel_queue_pop(RingQueue_t *q, uint8_t *data) {
     CRITICAL_SECTION_ENTER();
-    if (q->head == q->tail) {
-        CRITICAL_SECTION_EXIT();
-        return 1; 
+    /* Direct explicit check for empty queue conditions */
+    if (q->count == 0) {
+        EXIT_CRITICAL(primask);
+        return 0; 
     }
+
     *data = q->buffer[q->head];
-    q->head = (q->head + 1) % QUEUE_MAX_SIZE;
+    q->head = (q->head + 1) % q->capacity; /* Dynamic wrap-around based on queue capacity */
+    q->count--;
     CRITICAL_SECTION_EXIT();
     return 0;
 }

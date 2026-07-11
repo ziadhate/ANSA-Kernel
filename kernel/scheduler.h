@@ -7,7 +7,8 @@
 typedef enum {
     TASK_STATE_READY,
     TASK_STATE_RUNNING,
-    TASK_STATE_BLOCKED
+    TASK_STATE_BLOCKED,
+    TASK_STATE_SUSPENDED
 } TaskState_t;
 
 /* ======================================================================== */
@@ -33,17 +34,18 @@ typedef struct {
 /* ======================================================================== */
 /* ATOMIC RING-QUEUE STRUCTURE & PROTOTYPES                                 */
 /* ======================================================================== */
-#define QUEUE_MAX_SIZE 16
 
 typedef struct {
-    uint8_t buffer[QUEUE_MAX_SIZE];
-    uint16_t head;
-    uint16_t tail;
-    uint8_t overflow_flag; /* Catching full state boundary */
+    uint8_t *buffer;       /* Pointer to externally allocated array (Flexible Size) */
+    uint16_t capacity;     /* Dynamic maximum capacity of this specific queue */
+    uint16_t head;         /* Points to the oldest element (for pop) */
+    uint16_t tail;         /* Points to the next free slot (for push) */
+    uint16_t count;        /* Explicit tracking of current elements (Fixes overflow logic) */
+    uint8_t overflow_flag; /* Maintained for legacy/error tracking flags */
 } RingQueue_t;
 
 /* Queue API Function Prototypes */
-void kernel_queue_init(RingQueue_t *q);
+void kernel_queue_init(RingQueue_t *q, uint8_t *buf, uint16_t cap);
 uint8_t kernel_queue_push(RingQueue_t *q, uint8_t data);
 uint8_t kernel_queue_pop(RingQueue_t *q, uint8_t *data);
 
