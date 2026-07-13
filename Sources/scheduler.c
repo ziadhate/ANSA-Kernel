@@ -115,7 +115,7 @@ void kernel_start(void) {
 }
 
 /* DAY 8 Queue Functions (Unchanged) */
-void kernel_queue_init(RingQueue_t *q,, uint8_t *buf, uint16_t cap){
+void kernel_queue_init(RingQueue_t *q, uint8_t *buf, uint16_t cap){
     CRITICAL_SECTION_ENTER();
     q->buffer = buf;
     q->capacity = cap;
@@ -131,7 +131,7 @@ uint8_t kernel_queue_push(RingQueue_t *q, uint8_t data) {
     /* Fixed overflow check utilizing full capacity without wasting a slot */
     if (q->count == q->capacity) {
         q->overflow_flag = 1;
-        EXIT_CRITICAL(primask);         // restores exactly the previous state (nesting-safe)
+        CRITICAL_SECTION_EXIT();         // restores exactly the previous state (nesting-safe)
         return 0; 
     }
 
@@ -146,7 +146,7 @@ uint8_t kernel_queue_pop(RingQueue_t *q, uint8_t *data) {
     CRITICAL_SECTION_ENTER();
     /* Direct explicit check for empty queue conditions */
     if (q->count == 0) {
-        EXIT_CRITICAL(primask);
+        CRITICAL_SECTION_EXIT();
         return 0; 
     }
 
