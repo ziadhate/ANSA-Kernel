@@ -2,64 +2,59 @@
 #define SCHEDULER_H
 
 #include <stdint.h>
+#include <stdbool.h>
+#include "task.h"
 
-/* Task States Definitions */
-typedef enum {
-    TASK_STATE_READY,
-    TASK_STATE_RUNNING,
-    TASK_STATE_BLOCKED,
-    TASK_STATE_SUSPENDED
-} TaskState_t;
+#define SysTick_BASE    (0xE000E010UL)
+#define SysTick_CTRL    (*(volatile uint32_t *)(SysTick_BASE + 0x00))
+#define SysTick_LOAD    (*(volatile uint32_t *)(SysTick_BASE + 0x04))
+#define SysTick_VAL     (*(volatile uint32_t *)(SysTick_BASE + 0x08))
 
-/* ======================================================================== */
-/* Task Control Block (TCB) Structure */
+#define SCB_ICSR        (*(volatile uint32_t *)(0xE000ED04UL))
+#define SCB_SHPR3       (*(volatile uint32_t *)(0xE000ED20UL))
+#define ICSR_PENDSVSET  (1UL << 28)
+
+#define SYSTEM_CLOCK_HZ   16000000UL
+#define TICK_RATE_HZ      1000UL
+#define TIME_SLICE_TICKS  5U
+
+extern volatile uint32_t critical_nesting;
+
+#define CRITICAL_SECTION_ENTER() do {               \
+        __asm volatile ("cpsid i" ::: "memory");    \
+        critical_nesting++;                         \
+    } while (0)
+
+#define CRITICAL_SECTION_EXIT() do {                \
+        if (critical_nesting > 0U) {                \
+            critical_nesting--;                     \
+        }                                           \
+        if (critical_nesting == 0U) {               \
+            __asm volatile ("cpsie i" ::: "memory");\
+        }                                           \
+    } while (0)
+
 typedef struct {
-    uint32_t *sp;                  /* Stack Pointer: Tracks the task's context */
-    void (*task_function)(void *); /* Pointer to the task's main loop (Now takes void *arg) */
-    void *arg;                     /* Store the argument to pass to the task */
-    uint8_t priority;              /* Scheduling priority */
-    TaskState_t state;             /* Current state of the task */
-    uint32_t tick_counter;         /* Used for delays and timeouts */
-} TCB_t;
-
-/* ======================================================================== */
-/* DAY 8 CRITICAL SECTION PRIMITIVES (PRIMASK MANIPULATION)                 */
-/* ======================================================================== */
-/* CPSID i: Disables all configurable interrupts/exceptions immediately */
-#define CRITICAL_SECTION_ENTER()   __asm volatile ("CPSID i" : : : "memory")
-
-/* CPSIE i: Enables interrupts back to normal operational state */
-#define CRITICAL_SECTION_EXIT()    __asm volatile ("CPSIE i" : : : "memory")
-
-/* ======================================================================== */
-/* ATOMIC RING-QUEUE STRUCTURE & PROTOTYPES                                 */
-/* ======================================================================== */
-
-typedef struct {
-    uint8_t *buffer;       /* Pointer to externally allocated array (Flexible Size) */
-    uint16_t capacity;     /* Dynamic maximum capacity of this specific queue */
-    uint16_t head;         /* Points to the oldest element (for pop) */
-    uint16_t tail;         /* Points to the next free slot (for push) */
-    uint16_t count;        /* Explicit tracking of current elements (Fixes overflow logic) */
-    uint8_t overflow_flag; /* Maintained for legacy/error tracking flags */
+    uint8_t *buffer;
+    uint16_t capacity;
+    uint16_t head;
+    uint16_t tail;
+    uint16_t count;
+    uint8_t  overflow_flag;
 } RingQueue_t;
 
-/* Queue API Function Prototypes */
-void kernel_queue_init(RingQueue_t *q, uint8_t *buf, uint16_t cap);
-uint8_t kernel_queue_push(RingQueue_t *q, uint8_t data);
-uint8_t kernel_queue_pop(RingQueue_t *q, uint8_t *data);
+void     kernel_queue_init(RingQueue_t *q, uint8_t *buf, uint16_t cap);
+uint8_t  kernel_queue_push(RingQueue_t *q, uint8_t data);
+uint8_t  kernel_queue_pop(RingQueue_t *q, uint8_t *data);
 
-/* Core Scheduler API Function Prototypes */
-void kernel_init(void);
-uint8_t kernel_task_create(void (*fn)(void *), void *arg, uint8_t priority, uint32_t stack_size);
-void kernel_start(void);
-void kernel_yield(void);
-void kernel_update_ticks(void);
-
-/* ======================================================================== */
-/* PHASE II: TIMING API PROTOTYPES                                          */
-/* ======================================================================== */
+void     kernel_init(void);
+void     kernel_start(void) __attribute__((noreturn));
+void     kernel_yield(void);
+void     kernel_update_ticks(void);
 uint32_t kernel_get_tick_count(void);
-uint32_t kernel_ticks_to_ms(uint32_t ticks);
-void kernel_task_delay(uint32_t delay_ticks);
-#endif /* SCHEDULER_H */
+void     scheduler_select_next_task(void);
+
+extern TCB_t *current_task;
+extern TCB_t *next_task;
+
+#endif
