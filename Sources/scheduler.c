@@ -1,4 +1,4 @@
-#include "kernel/scheduler.h"
+#include "../includes/scheduler.h"
 
 /* Bare-Metal Core Register Definitions (Cortex-M4 SysTick) */
 #define SysTick_BASE        (0xE000E010UL)
@@ -15,6 +15,8 @@
 static TCB_t task_table[MAX_TASKS];         
 static int8_t current_task_id = -1; 
 static uint8_t total_tasks = 0;     
+/* Phase II: Monotonic Tick Counter */
+static volatile uint32_t global_tick_count = 0;
 
 /* ======================================================================== */
 /* DAY 15: DYNAMIC STATIC STACK ALLOCATION                                  */
@@ -157,5 +159,59 @@ uint8_t kernel_queue_pop(RingQueue_t *q, uint8_t *data) {
     return 0;
 }
 
-void kernel_yield(void) {}
-void kernel_update_ticks(void) {}
+
+/* ======================================================================== */
+/* PHASE II: TIMING & SCHEDULING ENGINE                                     */
+/* ======================================================================== */
+
+/* Called by SysTick_Handler every 1ms */
+void kernel_update_ticks(void) {
+    global_tick_count++;
+    
+    /* Iterate through tasks to decrement delays */
+    for(uint8_t i = 0; i < total_tasks; i++) {
+        if(task_table[i].state == TASK_STATE_BLOCKED) {
+            if(task_table[i].tick_counter > 0) {
+                task_table[i].tick_counter--;
+                
+                /* If the delay has elapsed, move back to READY */
+                if(task_table[i].tick_counter == 0) {
+                    task_table[i].state = TASK_STATE_READY;
+                }
+            }
+        }
+    }
+    
+    /* Trigger a scheduling decision (Request PendSV) */
+    /* 0xE000ED04 is the Interrupt Control and State Register (ICSR) */
+    /* Bit 28 is the PENDSVSET bit */
+    *(volatile uint32_t *)0xE000ED04 = (1UL << 28);
+}
+uint32_t kernel_get_tick_count(void) {
+    return global_tick_count;
+}
+
+uint32_t kernel_ticks_to_ms(uint32_t ticks) {
+    /* Since SysTick fires every 1ms (1kHz), 1 tick = 1ms */
+    return ticks; 
+}
+
+/* Moves the active task to BLOCKED state for a set number of ticks */
+void kernel_task_delay(uint32_t delay_ticks) {
+    if (delay_ticks > 0 && current_task_id >= 0) {
+        CRITICAL_SECTION_ENTER();
+        
+        task_table[current_task_id].tick_counter = delay_ticks;
+        task_table[current_task_id].state = TASK_STATE_BLOCKED;
+        
+        CRITICAL_SECTION_EXIT();
+        
+        /* Voluntarily yield the CPU since this task can no longer run */
+        kernel_yield();
+    }
+}
+
+/* Voluntarily requests a context switch */
+void kernel_yield(void) {
+    *(volatile uint32_t *)0xE000ED04 = (1UL << 28); /* Trigger PendSV */
+}

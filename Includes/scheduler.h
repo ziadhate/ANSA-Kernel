@@ -56,4 +56,10 @@ void kernel_start(void);
 void kernel_yield(void);
 void kernel_update_ticks(void);
 
+/* ======================================================================== */
+/* PHASE II: TIMING API PROTOTYPES                                          */
+/* ======================================================================== */
+uint32_t kernel_get_tick_count(void);
+uint32_t kernel_ticks_to_ms(uint32_t ticks);
+void kernel_task_delay(uint32_t delay_ticks);
 #endif /* SCHEDULER_H */
