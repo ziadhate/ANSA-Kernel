@@ -1,123 +1,161 @@
-#include "../includes/scheduler.h"
+//#include "includes/scheduler.h"
+#include "scheduler.h"
+#include <stddef.h>
+#include <stdint.h>
 
-/* Bare-Metal Core Register Definitions (Cortex-M4 SysTick) */
-#define SysTick_BASE        (0xE000E010UL)
-#define SysTick_CTRL        (*(volatile uint32_t *)(SysTick_BASE + 0x00))
-#define SysTick_LOAD        (*(volatile uint32_t *)(SysTick_BASE + 0x04))
-#define SysTick_VAL         (*(volatile uint32_t *)(SysTick_BASE + 0x08))
-#define SYSTEM_CLOCK_HZ     16000000UL
-
-/* OS Configuration Limits */
-#define MAX_TASKS           8
-#define KERNEL_STACK_POOL_SIZE 2048 /* Total pool size: 2048 words (8 KB total) */
-
-/* Global Variables */
-static TCB_t task_table[MAX_TASKS];         
-static int8_t current_task_id = -1; 
-static uint8_t total_tasks = 0;     
-/* Phase II: Monotonic Tick Counter */
-static volatile uint32_t global_tick_count = 0;
-
-/* ======================================================================== */
-/* DAY 15: DYNAMIC STATIC STACK ALLOCATION                                  */
-/* ======================================================================== */
-/* We pre-allocate a massive chunk of RAM, then distribute it to tasks      */
-/* CHECKLIST: Ensure 8-byte stack alignment using GCC attribute             */
-static uint32_t stack_pool[KERNEL_STACK_POOL_SIZE] __attribute__((aligned(8)));
-static uint32_t next_free_stack_word = 0; /* Tracks where the next stack begins */
+TCB_t *current_task = NULL;
+TCB_t *next_task     = NULL;
+ 
+static int8_t          current_task_id = -1;
+static volatile uint32_t g_tick_count  = 0;
+volatile uint32_t critical_nesting = 0;
 
 void kernel_init(void) {
-    SysTick_LOAD = (SYSTEM_CLOCK_HZ / 1000) - 1;
-    SysTick_VAL = 0;
-    SysTick_CTRL = (1UL << 2) | (1UL << 1) | (1UL << 0);
+    //task_pool_init();
+ 
+    // 1ms tick
+    SysTick_LOAD = (SYSTEM_CLOCK_HZ / TICK_RATE_HZ) - 1;
+    SysTick_VAL  = 0;
+    SysTick_CTRL = (1 << 2)   // CLKSOURCE 
+                 | (1 << 1)   // SysTick interrupt 
+                 | (1 << 0);  // ENABLE 
+ 
+    // PendSV at the lowest priority 
+    SCB_SHPR3 |= (0xFF << 16);
 }
 
-/* ======================================================================== */
-/* CHECKLIST: Implement kernel_stack_init()                                 */
-/* ======================================================================== */
-uint32_t* kernel_stack_init(uint32_t *stack_top, void (*fn)(void *), void *arg) {
-    uint32_t *sp = stack_top;
-    
-    *(--sp) = 0x01000000;       /* xPSR: Set Thumb bit */
-    *(--sp) = (uint32_t)fn;     /* PC: Task entry point */
-    *(--sp) = 0xFFFFFFFE;       /* LR/EXC_RETURN: Return booby trap */
-    *(--sp) = 0x12121212;       /* R12 */
-    *(--sp) = 0x03030303;       /* R3 */
-    *(--sp) = 0x02020202;       /* R2 */
-    *(--sp) = 0x01010101;       /* R1 */
-    *(--sp) = (uint32_t)arg;    /* R0: First argument (from void *arg) */
-
-    /* Fake the Software Context Stack Frame */
-    for (int i = 0; i < 8; i++) {
-        *(--sp) = 0x00000000;   /* R4-R11 */
+static TCB_t *pick_next_task(void) {
+    uint8_t count = task_count();
+    if (count == 0) {
+        return NULL;
     }
-    
-    return sp;
+ 
+    uint8_t best_priority = 0xFF; //only 0 - 255 priorities available
+    int8_t  best_id       = -1;
+ 
+    for (uint8_t offset = 1; offset <= count; offset++) {
+        uint8_t id = (uint8_t)((current_task_id + offset) % count);
+        TCB_t  *t  = task_get(id);
+ 
+        // check if the priority is less than max 255 also it will assign priority to 
+        // tasks that ready or running not to suspended or blocked
+        if ((t->state == TASK_STATE_READY || t->state == TASK_STATE_RUNNING) && (t->priority < best_priority)) { 
+            best_priority = t->priority; //priority is valid the best priority is give to current
+            best_id = (int8_t)id;
+        }
+    }
+ 
+    if (best_id < 0) {
+        return NULL;
+    }
+
+    current_task_id = best_id;
+    return task_get((uint8_t)best_id);
 }
 
-/* ======================================================================== */
-/* DAY 15: CUSTOM STACK SIZES IN TASK CREATION ENGINE                       */
-/* ======================================================================== */
-uint8_t kernel_task_create(void (*fn)(void *), void *arg, uint8_t priority, uint32_t stack_size) {
-    if (total_tasks >= MAX_TASKS) {
-        return 1; /* Max tasks reached */
+void scheduler_select_next_task(void) {
+    //if task is running and completed it is now send back to ready state
+    if ((current_task != NULL) && (current_task->state == TASK_STATE_RUNNING)) {
+        current_task->state = TASK_STATE_READY;
     }
-    
-    CRITICAL_SECTION_ENTER();
-    
-    /* CHECKLIST: Enforce 8-byte alignment (must be even number of 32-bit words) */
-    if (stack_size % 2 != 0) {
-        stack_size++; 
+ 
+    next_task = pick_next_task();
+ 
+    if (next_task != NULL) {
+        next_task->state = TASK_STATE_RUNNING;
+        next_task->tick_counter = TIME_SLICE_TICKS; 
+        //tick counter (10,9,8,7... 0) -> (again it can start new task from new tick value/time)  
     }
-    
-    /* 1. Ensure we have enough memory left in the pool */
-    if ((next_free_stack_word + stack_size) > KERNEL_STACK_POOL_SIZE) {
-        CRITICAL_SECTION_EXIT();
-        return 2; /* Out of stack memory! */
-    }
-    
-    /* 2. Carve out the requested memory */
-    uint32_t *stack_top = &stack_pool[next_free_stack_word + stack_size];
-    
-    /* Move the allocator forward for the next task that gets created */
-    next_free_stack_word += stack_size;
-    
-    /* 3. Initialize the stack frame using our new dedicated function */
-    uint32_t *sp = kernel_stack_init(stack_top, fn, arg);
+}
 
-    /* 4. Initialize the TCB */
-    task_table[total_tasks].sp = sp;
-    task_table[total_tasks].task_function = fn;
-    task_table[total_tasks].arg = arg;
-    task_table[total_tasks].priority = priority;
-    task_table[total_tasks].state = TASK_STATE_READY;
-    task_table[total_tasks].tick_counter = 0;
-    
-    total_tasks++;
-    
-    CRITICAL_SECTION_EXIT();
-    return 0;
+void SysTick_Handler(void) {
+    g_tick_count++;
+ 
+    if (current_task != NULL) {
+        //if task has time remaining if yess then decreament it 
+        if (current_task->tick_counter > 0) {
+            current_task->tick_counter--;
+        }
+        //if no time is left perform a context switch
+        if (current_task->tick_counter == 0) {
+            /* Request a context switch. PendSV runs at the lowest priority,
+             * so it's always safe to set this pending bit from any ISR. */
+            SCB_ICSR = ICSR_PENDSVSET;
+        }
+    }
+ 
+    kernel_update_ticks();
+}
+
+void kernel_update_ticks(void) {
+    //phase 2 part need help !!!1
+}
+
+uint32_t kernel_get_tick_count(void) {
+    return g_tick_count;
+}
+
+void kernel_yield(void) {
+    SCB_ICSR = ICSR_PENDSVSET;
+    __asm volatile ("dsb" ::: "memory");
+    __asm volatile ("isb" ::: "memory");
+}
+
+__attribute__((naked)) void PendSV_Handler(void) {
+    __asm volatile (
+        "cpsid   i                          \n"
+        "mrs     r0, psp                    \n"
+        "cbz     r0, save_done              \n"
+ 
+        "stmdb   r0!, {r4-r11}              \n" /* save R4-R11 to old task's stack */
+        "ldr     r1, =current_task          \n"
+        "ldr     r1, [r1]                   \n"
+        "str     r0, [r1]                   \n" /* current_task->sp = r0 (sp is 1st member) */
+ 
+        "save_done:                         \n"
+        "push    {lr}                       \n"
+        "bl      scheduler_select_next_task \n"
+        "pop     {lr}                       \n"
+ 
+        "ldr     r1, =current_task          \n"
+        "ldr     r2, =next_task             \n"
+        "ldr     r2, [r2]                   \n"
+        "str     r2, [r1]                   \n" /* current_task = next_task        */
+ 
+        "ldr     r0, [r2]                   \n" /* r0 = next_task->sp              */
+        "ldmia   r0!, {r4-r11}              \n" /* restore R4-R11 for the new task */
+        "msr     psp, r0                    \n"
+ 
+        "ldr     lr, =0xFFFFFFFD            \n" /* force: Thread mode, use PSP     */
+        "cpsie   i                          \n"
+        "bx      lr                         \n"
+    );
 }
 
 void kernel_start(void) {
     kernel_init();
-    
-    while(1) {
-        if (total_tasks > 0) {
-            current_task_id = (current_task_id + 1) % total_tasks;
-            
-            if (task_table[current_task_id].state == TASK_STATE_READY) {
-                task_table[current_task_id].state = TASK_STATE_RUNNING;
-                /* Pass the stored argument to the function when it runs */
-                task_table[current_task_id].task_function(task_table[current_task_id].arg);
-                task_table[current_task_id].state = TASK_STATE_READY;
-            }
+ 
+    if (task_count() == 0U) {
+        while (1) { //cpu waits here instead of crashing till tasks are assigned 
         }
+    }
+ 
+    current_task_id = -1;
+    current_task    = NULL; //  first context switch: no previous task to save
+
+    __asm volatile ("movs r0, #0");
+    __asm volatile ("msr psp, r0");
+ 
+    SCB_ICSR = ICSR_PENDSVSET;
+    __asm volatile ("cpsie i" ::: "memory");
+    __asm volatile ("isb" ::: "memory");
+ 
+    while (1) { // safety net if pendsv is not called or it fails 
     }
 }
 
-/* DAY 8 Queue Functions (Unchanged) */
-void kernel_queue_init(RingQueue_t *q, uint8_t *buf, uint16_t cap){
+
+void kernel_queue_init(RingQueue_t *q, uint8_t *buf, uint16_t cap) {
     CRITICAL_SECTION_ENTER();
     q->buffer = buf;
     q->capacity = cap;
@@ -127,91 +165,31 @@ void kernel_queue_init(RingQueue_t *q, uint8_t *buf, uint16_t cap){
     q->overflow_flag = 0;
     CRITICAL_SECTION_EXIT();
 }
-
+ 
 uint8_t kernel_queue_push(RingQueue_t *q, uint8_t data) {
     CRITICAL_SECTION_ENTER();
-    /* Fixed overflow check utilizing full capacity without wasting a slot */
     if (q->count == q->capacity) {
         q->overflow_flag = 1;
-        CRITICAL_SECTION_EXIT();         // restores exactly the previous state (nesting-safe)
-        return 0; 
+        CRITICAL_SECTION_EXIT();
+        return 0;
     }
-
     q->buffer[q->tail] = data;
-    q->tail = (q->tail + 1) % q->capacity; /* Dynamic wrap-around based on queue capacity */
+    q->tail = (uint16_t)((q->tail + 1) % q->capacity);
     q->count++;
     CRITICAL_SECTION_EXIT();
-    return 0; 
+    return 1;
 }
-
+ 
 uint8_t kernel_queue_pop(RingQueue_t *q, uint8_t *data) {
     CRITICAL_SECTION_ENTER();
-    /* Direct explicit check for empty queue conditions */
     if (q->count == 0) {
         CRITICAL_SECTION_EXIT();
-        return 0; 
+        return 0;
     }
-
     *data = q->buffer[q->head];
-    q->head = (q->head + 1) % q->capacity; /* Dynamic wrap-around based on queue capacity */
+    q->head = (uint16_t)((q->head + 1) % q->capacity);
     q->count--;
     CRITICAL_SECTION_EXIT();
-    return 0;
+    return 1;
 }
 
-
-/* ======================================================================== */
-/* PHASE II: TIMING & SCHEDULING ENGINE                                     */
-/* ======================================================================== */
-
-/* Called by SysTick_Handler every 1ms */
-void kernel_update_ticks(void) {
-    global_tick_count++;
-    
-    /* Iterate through tasks to decrement delays */
-    for(uint8_t i = 0; i < total_tasks; i++) {
-        if(task_table[i].state == TASK_STATE_BLOCKED) {
-            if(task_table[i].tick_counter > 0) {
-                task_table[i].tick_counter--;
-                
-                /* If the delay has elapsed, move back to READY */
-                if(task_table[i].tick_counter == 0) {
-                    task_table[i].state = TASK_STATE_READY;
-                }
-            }
-        }
-    }
-    
-    /* Trigger a scheduling decision (Request PendSV) */
-    /* 0xE000ED04 is the Interrupt Control and State Register (ICSR) */
-    /* Bit 28 is the PENDSVSET bit */
-    *(volatile uint32_t *)0xE000ED04 = (1UL << 28);
-}
-uint32_t kernel_get_tick_count(void) {
-    return global_tick_count;
-}
-
-uint32_t kernel_ticks_to_ms(uint32_t ticks) {
-    /* Since SysTick fires every 1ms (1kHz), 1 tick = 1ms */
-    return ticks; 
-}
-
-/* Moves the active task to BLOCKED state for a set number of ticks */
-void kernel_task_delay(uint32_t delay_ticks) {
-    if (delay_ticks > 0 && current_task_id >= 0) {
-        CRITICAL_SECTION_ENTER();
-        
-        task_table[current_task_id].tick_counter = delay_ticks;
-        task_table[current_task_id].state = TASK_STATE_BLOCKED;
-        
-        CRITICAL_SECTION_EXIT();
-        
-        /* Voluntarily yield the CPU since this task can no longer run */
-        kernel_yield();
-    }
-}
-
-/* Voluntarily requests a context switch */
-void kernel_yield(void) {
-    *(volatile uint32_t *)0xE000ED04 = (1UL << 28); /* Trigger PendSV */
-}
