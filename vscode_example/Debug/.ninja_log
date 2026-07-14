@@ -1,0 +1,9 @@
+# ninja log v7
+18	886	8056397276226760	CMakeFiles/vscode_example.dir/Startup/startup_stm32l476rgtx.s.obj	90d3eb3e10de300f
+20	619	8056400501225834	CMakeFiles/vscode_example.dir/Sources/main.c.obj	6560ae50ea7b71ff
+283	1225	8056397278837493	CMakeFiles/vscode_example.dir/Sources/sysmem.c.obj	ae3ebd8137c0dcd5
+216	1209	8056397278197082	CMakeFiles/vscode_example.dir/Sources/syscalls.c.obj	f4b7b60e782a590
+620	2109	8056400507243928	vscode_example.elf	e95785dbcff2e01c
+348	1276	8056397279534090	CMakeFiles/vscode_example.dir/Sources/scheduler.c.obj	f9655202d1951330
+17	4010	8057529986495348	CMakeFiles/vscode_example.dir/Sources/main.c.obj	6560ae50ea7b71ff
+4013	10124	8057530026322893	vscode_example.elf	e95785dbcff2e01c
