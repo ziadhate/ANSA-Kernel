@@ -31,13 +31,16 @@ typedef struct{
 
 /*to check functioning, means if the functions are working properly they will
 return this values*/
-#define TASK_CREATE_OK            0
-#define TASK_CREATE_ERR_MAX_TASKS 1
-#define TASK_CREATE_ERR_NO_MEMORY 2
-#define TASK_CREATE_ERR_BAD_ARGS  3
+typedef enum
+{
+    TASK_CREATE_OK = 0,
+    TASK_CREATE_ERR_MAX_TASKS,
+    TASK_CREATE_ERR_NO_MEMORY,
+    TASK_CREATE_ERR_BAD_ARGS
+} task_create_status_t;
 
 void task_pool_init(void);
-uint8_t task_create(TaskFunction_t fn, void *arg, uint8_t priority, uint32_t stack_words);
+task_create_status_t task_create(TaskFunction_t fn, void *arg, uint8_t priority, uint32_t stack_words);
 uint32_t *kernel_stack_init(uint32_t *stack_top, TaskFunction_t fn, void *arg);
 TCB_t  *task_get(uint8_t id);
 uint8_t task_count(void);

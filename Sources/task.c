@@ -39,7 +39,7 @@ uint32_t *kernel_stack_init(uint32_t *stack_top, TaskFunction_t fn, void *arg) {
     return sp;
 }
 
-uint8_t task_create(TaskFunction_t fn, void *arg, uint8_t priority, uint32_t stack_words) {
+task_create_status_t task_create(TaskFunction_t fn, void *arg, uint8_t priority, uint32_t stack_words) {
     if (fn == NULL || stack_words < TASK_STACK_MIN_WORDS) {
         return TASK_CREATE_ERR_BAD_ARGS;
     }
@@ -52,7 +52,7 @@ uint8_t task_create(TaskFunction_t fn, void *arg, uint8_t priority, uint32_t sta
         stack_words++;
     }
  
-    uint8_t err = TASK_CREATE_OK;
+    task_create_status_t err = TASK_CREATE_OK;
  
     CRITICAL_SECTION_ENTER();
  
