@@ -16,7 +16,7 @@ typedef void (*TaskFunction_t)(void *arg);
 typedef struct{
     uint32_t *sp;
     TaskFunction_t task_function;
-    void (*arg);
+    void *arg;
     uint8_t priority;
     TaskState_t state;
     uint32_t tick_counter;
@@ -44,6 +44,7 @@ task_create_status_t task_create(TaskFunction_t fn, void *arg, uint8_t priority,
 uint32_t *kernel_stack_init(uint32_t *stack_top, TaskFunction_t fn, void *arg);
 TCB_t  *task_get(uint8_t id);
 uint8_t task_count(void);
+task_create_status_t idle_task_create(void); 
 
 
 #endif 
