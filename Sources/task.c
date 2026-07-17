@@ -9,6 +9,20 @@ static uint8_t total_tasks = 0;
 static uint32_t stack_pool[KERNEL_STACK_POOL_SIZE] __attribute__((aligned(8)));
 static uint32_t next_free_stack_word = 0;
 
+#define IDLE_STACK_WORDS   32   //minimum number of words
+#define IDLE_PRIORITY      0xFF //least prior
+
+static void idle_task_function(void *arg) {
+    (void)arg;  
+    for (;;) {
+        __asm volatile ("wfi");   
+    }
+}
+
+task_create_status_t idle_task_create(void) {
+    return task_create(idle_task_function, NULL, IDLE_PRIORITY, IDLE_STACK_WORDS);
+}
+
 void task_pool_init(void) {
     // Replaces memset: manually zero out the task_table memory
     uint8_t *ptr = (uint8_t *)task_table;
