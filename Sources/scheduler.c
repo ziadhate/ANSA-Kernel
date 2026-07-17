@@ -88,7 +88,22 @@ void SysTick_Handler(void) {
 }
 
 void kernel_update_ticks(void) {
-    //phase 2 part need help !!!1
+    g_tick_count++;
+    uint8_t task_woken = 0;
+
+    for (uint8_t i = 0; i < total_tasks; i++) {
+        if (task_table[i].state == TASK_STATE_BLOCKED && task_table[i].tick_counter > 0) {
+            task_table[i].tick_counter--;
+            if (task_table[i].tick_counter == 0) {
+                task_table[i].state = TASK_STATE_READY;
+                task_woken = 1;
+            }
+        }
+    }
+
+    if (task_woken) {
+        SCB_ICSR = ICSR_PENDSVSET;
+    }
 }
 
 uint32_t kernel_get_tick_count(void) {
