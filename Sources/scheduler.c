@@ -11,7 +11,8 @@ static volatile uint32_t g_tick_count  = 0;
 volatile uint32_t critical_nesting = 0;
 
 void kernel_init(void) {
-    //task_pool_init();
+    task_pool_init();
+    idle_task_create();
  
     // 1ms tick
     SysTick_LOAD = (SYSTEM_CLOCK_HZ / TICK_RATE_HZ) - 1;
