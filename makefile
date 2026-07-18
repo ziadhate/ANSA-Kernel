@@ -4,41 +4,41 @@
 
 # 1. Toolchain setup
 CC = arm-none-eabi-gcc
+AR = arm-none-eabi-ar
 OBJCOPY = arm-none-eabi-objcopy
 SIZE = arm-none-eabi-size
 
 # 2. Project Files & Directories
-TARGET = ansa_kernel
+TARGET = build/libansa_kernel.a
 BUILD_DIR = build
-SRCS = scheduler.c startup_stm32.c
-
-# Prefix the build directory to the object files
-OBJS = $(addprefix $(BUILD_DIR)/, $(SRCS:.c=.o))
+SRCS = Sources/scheduler.c Sources/task.c Sources/kernal_queue.c startup_stm32.c
+OBJS = $(patsubst Sources/%.c,$(BUILD_DIR)/%.o,$(SRCS))
 
 # 3. CPU Architecture Flags
 CPU_FLAGS = -mcpu=cortex-m4 -mthumb -mfloat-abi=hard -mfpu=fpv4-sp-d16
 
 # 4. Compiler Flags
-CFLAGS = $(CPU_FLAGS) -O0 -g3 -Wall -Wextra -std=gnu11
+CFLAGS = $(CPU_FLAGS) -O0 -g3 -Wall -Wextra -std=gnu11 -IIncludes
 
 # ==============================================================================
 # Build Rules
 # ==============================================================================
 
 # Default target
-all: $(BUILD_DIR) $(OBJS)
-	@echo "Successfully compiled object files into $(BUILD_DIR)/!"
+all: $(TARGET)
+	@echo "Successfully built $(TARGET)!"
 
-# Rule to create the build directory if it doesn't exist
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
 
-# How to compile .c files into .o files inside the build folder
-$(BUILD_DIR)/%.o: %.c kernel/scheduler.h | $(BUILD_DIR)
+$(BUILD_DIR)/%.o: Sources/%.c | $(BUILD_DIR)
 	@echo "Compiling $<..."
 	$(CC) $(CFLAGS) -c $< -o $@
 
-# Clean up build artifacts by deleting the whole build folder
+$(TARGET): $(OBJS)
+	$(AR) rcs $@ $^
+
+# Clean up build artifacts by deleting the build folder
 clean:
 	@echo "Cleaning up..."
 	rm -rf $(BUILD_DIR)
