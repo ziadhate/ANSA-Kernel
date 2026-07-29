@@ -31,33 +31,45 @@ void kernel_init(void) {
     SCB_SHPR3 |= (0xFF << 16);
 }
 
-static TCB_t *pick_next_task(void) {
+static TCB_t *pick_next_task(void)
+{
     uint8_t count = task_count();
+
     if (count == 0) {
         return NULL;
     }
- 
+
     uint16_t best_priority = 256;
-    int8_t  best_id       = -1;
- 
+    int8_t best_id = -1;
+
+   
     for (uint8_t offset = 1; offset <= count; offset++) {
+
         uint8_t id = (uint8_t)((current_task_id + offset) % count);
-        TCB_t  *t  = task_get(id);
- 
-        // check if the priority is less than max 255 also it will assign priority to 
-        // tasks that ready or running not to suspended or blocked
-        if ((t->state == TASK_STATE_READY || t->state == TASK_STATE_RUNNING) && (t->priority < best_priority)) { 
-            best_priority = t->priority; //priority is valid the best priority is give to current
-            best_id = (int8_t)id;
+
+       
+        if (id == 0)
+            continue;
+
+        TCB_t *t = task_get(id);
+
+        if ((t->state == TASK_STATE_READY ||
+             t->state == TASK_STATE_RUNNING) &&
+            (t->priority < best_priority)) {
+
+            best_priority = t->priority;
+            best_id = id;
         }
     }
- 
+
+
     if (best_id < 0) {
-        return NULL;
+        current_task_id = 0;
+        return task_get(0);
     }
 
     current_task_id = best_id;
-    return task_get((uint8_t)best_id);
+    return task_get(best_id);
 }
 
 void scheduler_select_next_task(void) {
