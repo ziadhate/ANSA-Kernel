@@ -12,7 +12,7 @@ void kernel_queue_init(PtrQueue_t *q, void **buf, uint16_t capacity) {
     CRITICAL_SECTION_EXIT();
 }
 
-uint8_t kernel_queue_push(PtrQueue_t *q, void *item) {
+uint8_t kernel_queue_push(PtrQueue_t *q, void **item) {
     CRITICAL_SECTION_ENTER();
     if (q->count == q->capacity) {
         q->overflow_flag = 1;
