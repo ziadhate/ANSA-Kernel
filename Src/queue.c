@@ -67,25 +67,84 @@ queue_status kernel_queue_pop(kernel_queue_t *q, void *data)
 // Inserts a blocked task at the end of a waiting queue, preserving FIFO ordering for subsequent wake-up operations.
 void task_queue_push_task(task_queue_t *q, TCB_t *task_tcb){
     // Code
+	if(q == NULL || task_tcb == NULL){
+		return;
+	}
+	task_tcb -> next == NULL;
+    if (q->tail == NULL)
+    {
+        q->head = task_tcb;
+        q->tail = task_tcb;
+    }
+    else
+    {
+        q->tail->next = task_tcb;
+        q->tail = task_tcb;
+    }
 }
 
 // Removes and returns the first task from a waiting queue while maintaining queue consistency.
 TCB_t *task_queue_pop_task(task_queue_t *q){
-    // Code
-    return NULL;
+    if ((q == NULL) || (q->head == NULL))
+    {
+        return NULL;
+    }
+
+    TCB_t *task = q->head;
+    q->head = task->next;
+
+    if (q->head == NULL)
+    {
+        q->tail = NULL;
+    }
+
+    task->next = NULL;
+    return task;
 }
 
 // Checks whether the specified waiting queue contains any blocked tasks.
 bool task_queue_empty(task_queue_t *q){
-    // Code
-    return true;
+    return (q == NULL) || (q->head == NULL);
 }
 
 // Removes a specific task from a waiting queue regardless of its position and updates the queue links accordingly.
 // Useful when we remove tasks based on a specific parameter (ex: priority)
 bool task_queue_remove(task_queue_t *q, TCB_t *task){
-    // Code
-    return true;
+    if ((q == NULL) || (task == NULL) || (q->head == NULL))
+    {
+        return false;
+    }
+
+    TCB_t *prev = NULL;
+    TCB_t *curr = q->head;
+
+    while (curr != NULL)
+    {
+        if (curr == task)
+        {
+            if (prev == NULL)
+            {
+                q->head = curr->next;
+            }
+            else
+            {
+                prev->next = curr->next;
+            }
+
+            if (curr == q->tail)
+            {
+                q->tail = prev;
+            }
+
+            curr->next = NULL;
+            return true;
+        }
+
+        prev = curr;
+        curr = curr->next;
+    }
+
+    return false;
 }
 
 /*
