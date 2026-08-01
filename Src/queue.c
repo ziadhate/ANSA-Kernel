@@ -1,5 +1,6 @@
 #include "../Inc/queue.h"
 #include "../Inc/scheduler.h"
+#include <string.h>
 
 /*
 	Initializes a kernel queue by configuring its storage buffer,
@@ -7,6 +8,10 @@
 */
 queue_status kernel_queue_init(kernel_queue_t *q, void *buffer, uint8_t capacity, uint16_t item_size)
 {
+    if ((q == NULL) || (buffer == NULL) || (capacity == 0U) || (item_size == 0U))
+    {
+        return init_failed;
+    }
 	CRITICAL_SECTION_ENTER();
     q->buffer=(uint8_t *)buffer;
     q->capacity=capacity;
@@ -23,6 +28,7 @@ queue_status kernel_queue_init(kernel_queue_t *q, void *buffer, uint8_t capacity
     q->receivers_waiting.tail=NULL;
     
     CRITICAL_SECTION_EXIT();
+    return init_success;
 }
 
 /* 
@@ -34,28 +40,28 @@ queue_status kernel_queue_push(kernel_queue_t *q, const void *data)
     if (q->count==q->capacity)
     {
         q->overflow_flag = 1;
-        return init_failed;
+        return failed;
     }
     memcpy(&q->buffer[q->tail*q->item_size], data, q->item_size);
     q->tail = (q->tail+1) % q->capacity;
     q->count++;
-    return init_success;
+    return passed;
 }
 
 /*
 	Removes the oldest item from the circular buffer, updates the queue
 	state, and returns the appropriate operation status.
 */
-uint8_t kernel_queue_pop(kernel_queue_t *q, void *data)
+queue_status kernel_queue_pop(kernel_queue_t *q, void *data)
 {
     if (q->count==0)
     {
-        return init_failed;
+        return failed;
     }
     memcpy(data, &q->buffer[q->head*q->item_size], q->item_size);
     q->head = (q->head+1) % q->capacity;
     q->count--;
-    return init_failed;
+    return failed;
 }
 
 // Inserts a blocked task at the end of a waiting queue, preserving FIFO ordering for subsequent wake-up operations.
@@ -66,17 +72,20 @@ void task_queue_push_task(task_queue_t *q, TCB_t *task_tcb){
 // Removes and returns the first task from a waiting queue while maintaining queue consistency.
 TCB_t *task_queue_pop_task(task_queue_t *q){
     // Code
+    return NULL;
 }
 
 // Checks whether the specified waiting queue contains any blocked tasks.
 bool task_queue_empty(task_queue_t *q){
     // Code
+    return true;
 }
 
 // Removes a specific task from a waiting queue regardless of its position and updates the queue links accordingly.
 // Useful when we remove tasks based on a specific parameter (ex: priority)
-TCB_t task_queue_remove(task_queue_t *q, TCB_t *task){
+bool task_queue_remove(task_queue_t *q, TCB_t *task){
     // Code
+    return true;
 }
 
 /*
@@ -86,6 +95,7 @@ TCB_t task_queue_remove(task_queue_t *q, TCB_t *task){
 */
 queue_status kernel_queue_send(kernel_queue_t *q, const void *item, uint32_t timeout_ticks){
     // Code
+    return passed;
 }
 
 /* 
@@ -95,6 +105,7 @@ queue_status kernel_queue_send(kernel_queue_t *q, const void *item, uint32_t tim
  */
 queue_status kernel_queue_receive(kernel_queue_t *q, void *item, uint32_t timeout_ticks){
     // Code
+    return passed;
 }
 
 /* 

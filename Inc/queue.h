@@ -27,6 +27,7 @@ typedef enum{
 	init_failed=0,
 	init_success,
 	passed,
+	failed,
 	timed_out,
 } queue_status;
 
@@ -36,7 +37,7 @@ queue_status kernel_queue_pop(kernel_queue_t *q, void *data);
 void task_queue_push_task(task_queue_t *q, TCB_t *task_tcb);
 TCB_t *task_queue_pop_task(task_queue_t *q);
 bool task_queue_empty(task_queue_t *q);
-TCB_t task_queue_remove(task_queue_t *q, TCB_t *task);
+bool task_queue_remove(task_queue_t *q, TCB_t *task);
 queue_status kernel_queue_send(kernel_queue_t *q, const void *item, uint32_t timeout_ticks) ;
 queue_status kernel_queue_receive(kernel_queue_t *q, void *item, uint32_t timeout_ticks);
 void kernel_tick_check_timeouts(void);
