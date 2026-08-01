@@ -102,12 +102,10 @@ void SysTick_Handler(void) {
             SCB_ICSR = ICSR_PENDSVSET;
         }
     }
- 
     kernel_update_ticks();
 }
 
 void kernel_update_ticks(void) {
-    g_tick_count++;
     uint8_t task_woken = 0;
 
     for (uint8_t i = 0; i < total_tasks; i++) {

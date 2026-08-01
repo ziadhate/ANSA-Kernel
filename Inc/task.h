@@ -4,6 +4,10 @@
 #include<stdint.h>
 #include<stddef.h>
 
+#define MAX_TASKS 8
+#define KERNEL_STACK_POOL_SIZE  2048
+#define TASK_STACK_MIN_WORDS    32
+
 typedef enum {
     TASK_STATE_READY,                       //next task to run
     TASK_STATE_RUNNING,                     //currently running
@@ -12,8 +16,9 @@ typedef enum {
 } TaskState_t;
 
 typedef void (*TaskFunction_t)(void *arg);
+typedef struct task_queue_t task_queue_t;   // Forward declaration
 
-typedef struct{
+typedef struct TCB_t{
     uint32_t *sp;
     TaskFunction_t task_function;
     void *arg;
@@ -23,11 +28,11 @@ typedef struct{
     uint32_t *stack_base;                   //starting memory of task
     uint32_t stack_words;                   //size of stack 32 words = 128bytes (1 word = 4 bytes)
 
+    // Added for queue support
+    struct TCB_t *next; // Pointer to the next task in a waiting queue.
+    task_queue_t *current_wait_queue; // // Queue on which the task is currently blocked.
+    volatile uint8_t timed_out; // Indicates whether the task was unblocked due to a timeout.
 } TCB_t;
-
-#define MAX_TASKS 8
-#define KERNEL_STACK_POOL_SIZE  2048
-#define TASK_STACK_MIN_WORDS    32
 
 /*to check functioning, means if the functions are working properly they will
 return this values*/
