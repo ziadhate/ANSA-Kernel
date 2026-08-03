@@ -39,16 +39,19 @@ static TCB_t *pick_next_task(void)
         return NULL;
     }
 
+    /* Idle task is always the last task created */
+    uint8_t idle_task_id = count - 1;
+
     uint16_t best_priority = 256;
     int8_t best_id = -1;
 
-   
+    /* Search all runnable tasks except the Idle Task */
     for (uint8_t offset = 1; offset <= count; offset++) {
 
         uint8_t id = (uint8_t)((current_task_id + offset) % count);
 
-       
-        if (id == 0)
+        /* Skip Idle Task during normal scheduling */
+        if (id == idle_task_id)
             continue;
 
         TCB_t *t = task_get(id);
@@ -62,10 +65,10 @@ static TCB_t *pick_next_task(void)
         }
     }
 
-
+    /* If no runnable user task exists, run the Idle Task */
     if (best_id < 0) {
-        current_task_id = 0;
-        return task_get(0);
+        current_task_id = idle_task_id;
+        return task_get(idle_task_id);
     }
 
     current_task_id = best_id;
