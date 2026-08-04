@@ -1,4 +1,4 @@
-nclude "../Inc/queue.h"
+#include "../Inc/queue.h"
 #include "../Inc/scheduler.h"
 #include <string.h>
  
