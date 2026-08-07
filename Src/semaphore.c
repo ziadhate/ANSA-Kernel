@@ -50,14 +50,14 @@ queue_status kernel_sem_take(kernel_sem_t *sem, uint32_t timeout_ticks)
  
     // No token available return time out
     current_task->timed_out = 0U;
-    current_task->tick_counter = kernel_get_tick_count() + timeout_ticks;
+    current_task->tick_counter = kernel_get_tick_count() + timeout_ticks; //increament timer
     current_task->current_wait_queue = &sem->waiters;
-    current_task->state = TASK_STATE_BLOCKED;
-    task_queue_push_task(&sem->waiters, current_task);
+    current_task->state = TASK_STATE_BLOCKED; //BLOCK the task
+    task_queue_push_task(&sem->waiters, current_task); // push task for getting ready
  
     CRITICAL_SECTION_EXIT();
  
-    kernel_yield();
+    kernel_yield(); //context switch
  
     CRITICAL_SECTION_ENTER();
  
@@ -82,6 +82,7 @@ queue_status kernel_sem_take(kernel_sem_t *sem, uint32_t timeout_ticks)
     return status;
 }
 
+//release tokens
 queue_status kernel_sem_give(kernel_sem_t *sem)
 {
     if (sem == NULL)
@@ -91,18 +92,18 @@ queue_status kernel_sem_give(kernel_sem_t *sem)
  
     CRITICAL_SECTION_ENTER();
  
-    if (sem->count >= sem->max_count)
+    if (sem->count >= sem->max_count) //check number of tokens is full
     {
         
         CRITICAL_SECTION_EXIT();
         return failed;
     }
  
-    sem->count++;
+    sem->count++; // if not full add tokens
  
     if (!task_queue_empty(&sem->waiters))
     {
-        TCB_t *woken = task_queue_pop_task(&sem->waiters);
+        TCB_t *woken = task_queue_pop_task(&sem->waiters); //pop highest priority task
         woken->current_wait_queue = NULL;
         woken->state = TASK_STATE_READY;
     }
@@ -110,4 +111,18 @@ queue_status kernel_sem_give(kernel_sem_t *sem)
     CRITICAL_SECTION_EXIT();
     return passed;
 }
-
+uint32_t kernel_sem_get_count(const kernel_sem_t *sem)
+{
+    uint32_t count;
+ 
+    if (sem == NULL)
+    {
+        return 0U;
+    }
+ 
+    CRITICAL_SECTION_ENTER();
+    count = sem->count;
+    CRITICAL_SECTION_EXIT();
+ 
+    return count;
+}
