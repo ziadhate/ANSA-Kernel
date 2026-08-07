@@ -35,7 +35,7 @@ queue_status kernel_sem_take(kernel_sem_t *sem, uint32_t timeout_ticks)
  
     if (sem->count > 0U)
     {
-        /* Fast path: a token is already available. */
+        // Fast path: a token is already available. 
         sem->count--;
         CRITICAL_SECTION_EXIT();
         return passed;
@@ -43,13 +43,12 @@ queue_status kernel_sem_take(kernel_sem_t *sem, uint32_t timeout_ticks)
  
     if (timeout_ticks == 0U)
     {
-        /* No token and caller doesn't want to wait. */
+        // No token and caller doesn't want to wait.
         CRITICAL_SECTION_EXIT();
         return failed;
     }
  
-    /* No token available: block the calling task until one is given or
-       timeout expires. tick_counter holds an ABSOLUTE deadline tick. */
+    // No token available return time out
     current_task->timed_out = 0U;
     current_task->tick_counter = kernel_get_tick_count() + timeout_ticks;
     current_task->current_wait_queue = &sem->waiters;
@@ -75,12 +74,40 @@ queue_status kernel_sem_take(kernel_sem_t *sem, uint32_t timeout_ticks)
     }
     else
     {
-        //Should not happen under normal operation safety precautions
+        //Should not happen under normal operation but safety precautions
         status = failed;
     }
  
     CRITICAL_SECTION_EXIT();
     return status;
 }
+
+queue_status kernel_sem_give(kernel_sem_t *sem)
+{
+    if (sem == NULL)
+    {
+        return failed;
+    }
  
+    CRITICAL_SECTION_ENTER();
+ 
+    if (sem->count >= sem->max_count)
+    {
+        
+        CRITICAL_SECTION_EXIT();
+        return failed;
+    }
+ 
+    sem->count++;
+ 
+    if (!task_queue_empty(&sem->waiters))
+    {
+        TCB_t *woken = task_queue_pop_task(&sem->waiters);
+        woken->current_wait_queue = NULL;
+        woken->state = TASK_STATE_READY;
+    }
+ 
+    CRITICAL_SECTION_EXIT();
+    return passed;
+}
 
