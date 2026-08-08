@@ -3,45 +3,21 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include "../Port/Cortex_M4/Inc/port.h" 
 #include "task.h"
 #include "queue.h"
 
-#define SysTick_BASE    (0xE000E010UL)
-#define SysTick_CTRL    (*(volatile uint32_t *)(SysTick_BASE + 0x00))
-#define SysTick_LOAD    (*(volatile uint32_t *)(SysTick_BASE + 0x04))
-#define SysTick_VAL     (*(volatile uint32_t *)(SysTick_BASE + 0x08))
-
-#define SCB_ICSR        (*(volatile uint32_t *)(0xE000ED04UL))
-#define SCB_SHPR3       (*(volatile uint32_t *)(0xE000ED20UL))
-#define ICSR_PENDSVSET  (1UL << 28)
-
-#define SYSTEM_CLOCK_HZ   16000000UL
 #define TICK_RATE_HZ      1000UL
 #define TIME_SLICE_TICKS  5U
-
-extern volatile uint32_t critical_nesting;
-
-#define CRITICAL_SECTION_ENTER() do {               \
-		__asm volatile ("cpsid i" ::: "memory");    \
-		critical_nesting++;                         \
-} while (0)
-
-#define CRITICAL_SECTION_EXIT() do {                \
-		if (critical_nesting > 0U) {                \
-			critical_nesting--;                     \
-		}                                           \
-		if (critical_nesting == 0U) {               \
-			__asm volatile ("cpsie i" ::: "memory");\
-		}                                           \
-} while (0)
 
 void     kernel_init(void);
 void     kernel_start(void) __attribute__((noreturn));
 void     kernel_yield(void);
 void     kernel_update_ticks(void);
 uint32_t kernel_get_tick_count(void);
-void     scheduler_select_next_task(void);
+void     scheduler_switch_context(void);
 void task_delay(uint32_t delay_ticks);
+void task_delay_until(uint32_t *previous_wake_tick, uint32_t period);
 /* Converts system ticks to milliseconds */
 uint32_t kernel_ticks_to_ms(uint32_t ticks);
 /* Converts milliseconds to system ticks */
