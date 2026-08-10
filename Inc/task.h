@@ -23,7 +23,9 @@ typedef struct TCB_t{
     TaskFunction_t task_function;
     void *arg;
     uint8_t priority;
+    uint32_t period;
     TaskState_t state;
+    uint32_t wakeup_tick;
     uint32_t tick_counter;
     uint32_t *stack_base;                   //starting memory of task
     uint32_t stack_words;                   //size of stack 32 words = 128bytes (1 word = 4 bytes)
@@ -45,10 +47,9 @@ typedef enum
 } task_create_status_t;
 
 void task_pool_init(void);
-task_create_status_t task_create(TaskFunction_t fn, void *arg, uint8_t priority, uint32_t stack_words);
-uint32_t *kernel_stack_init(uint32_t *stack_top, TaskFunction_t fn, void *arg);
-TCB_t  *task_get(uint8_t id);
-uint8_t task_count(void);
+task_create_status_t kernel_task_create(TaskFunction_t fn, void *arg, uint8_t priority, uint32_t stack_words, uint32_t period);
+TCB_t  *task_get_TCB(uint8_t id);
+uint8_t kernel_task_count(void);
 task_create_status_t idle_task_create(void);
 
 extern TCB_t task_table[MAX_TASKS];

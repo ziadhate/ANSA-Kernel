@@ -6,13 +6,13 @@
 	Initializes a kernel queue by configuring its storage buffer,
 	resetting the circular buffer state, and preparing the sender and receiver waiting queues for operation.
 */
-queue_status kernel_queue_init(kernel_queue_t *q, void *buffer, uint8_t capacity, uint16_t item_size)
+queue_status_t kernel_queue_init(kernel_queue_t *q, void *buffer, uint8_t capacity, uint16_t item_size)
 {
     if ((q == NULL) || (buffer == NULL) || (capacity == 0U) || (item_size == 0U))
     {
-        return init_failed;
+        return QUEUE_INIT_FAILED;
     }
-	CRITICAL_SECTION_ENTER();
+	port_critical_enter();
     q->buffer=(uint8_t *)buffer;
     q->capacity=capacity;
     q->item_size=item_size;
@@ -27,41 +27,45 @@ queue_status kernel_queue_init(kernel_queue_t *q, void *buffer, uint8_t capacity
     q->receivers_waiting.head=NULL;
     q->receivers_waiting.tail=NULL;
     
-    CRITICAL_SECTION_EXIT();
-    return init_success;
+    port_critical_exit();
+    return QUEUE_INIT_SUCCESS;
 }
  
 /* 
 	Inserts a new item into the circular buffer if space is available.
 	Updates the queue state and returns the appropriate status.
 */
-queue_status kernel_queue_push(kernel_queue_t *q, const void *data)
+queue_status_t kernel_queue_push(kernel_queue_t *q, const void *data)
 {
     if (q->count==q->capacity)
     {
         q->overflow_flag = 1;
-        return failed;
+        return QUEUE_FAILED;
     }
     memcpy(&q->buffer[q->tail*q->item_size], data, q->item_size);
     q->tail = (q->tail+1) % q->capacity;
     q->count++;
-    return passed;
+    return QUEUE_PASSED;
 }
  
 /*
 	Removes the oldest item from the circular buffer, updates the queue
 	state, and returns the appropriate operation status.
 */
-queue_status kernel_queue_pop(kernel_queue_t *q, void *data)
+queue_status_t kernel_queue_pop(kernel_queue_t *q, void *data)
 {
     if (q->count==0)
     {
-        return failed;
+        return QUEUE_FAILED;
     }
     memcpy(data, &q->buffer[q->head*q->item_size], q->item_size);
     q->head = (q->head+1) % q->capacity;
     q->count--;
+<<<<<<< HEAD
     return passed;
+
+    return QUEUE_PASSED;
+>>>>>>> 6b52e105fb5629fbf31170d9af30d42b07535610
 }
  
 /*
@@ -229,15 +233,14 @@ bool task_queue_remove(task_queue_t *q, TCB_t *task){
 	    simply compares kernel_get_tick_count() against it instead of
 	    counting down every tick.
 */
-queue_status kernel_queue_send(kernel_queue_t *q, const void *item, uint32_t timeout_ticks){
-    queue_status status;
- 
+queue_status_t kernel_queue_send(kernel_queue_t *q, const void *item, uint32_t timeout_ticks){
+    queue_status_t status;
     if ((q == NULL) || (item == NULL))
     {
-        return failed;
+        return QUEUE_FAILED;
     }
  
-    CRITICAL_SECTION_ENTER();
+    port_critical_enter();
  
     if (q->count < q->capacity)
     {
@@ -251,15 +254,15 @@ queue_status kernel_queue_send(kernel_queue_t *q, const void *item, uint32_t tim
             woken->state = TASK_STATE_READY;
         }
  
-        CRITICAL_SECTION_EXIT();
-        return passed;
+        port_critical_exit();
+        return QUEUE_PASSED;
     }
  
     if (timeout_ticks == 0U)
     {
         /* Queue full and caller doesn't want to wait. */
-        CRITICAL_SECTION_EXIT();
-        return failed;
+        port_critical_exit();
+        return QUEUE_FAILED;
     }
  
     /* Queue is full: block the calling task until space frees up or timeout expires.
@@ -270,17 +273,17 @@ queue_status kernel_queue_send(kernel_queue_t *q, const void *item, uint32_t tim
     current_task->state = TASK_STATE_BLOCKED;
     task_queue_push_task(&q->senders_waiting, current_task);
  
-    CRITICAL_SECTION_EXIT();
+    port_critical_exit();
  
     /* Give up the CPU; we resume here once woken (by a receiver) or timed out. */
     kernel_yield();
  
-    CRITICAL_SECTION_ENTER();
+    port_critical_enter();
  
     if (current_task->timed_out)
     {
-        CRITICAL_SECTION_EXIT();
-        return timed_out;
+        port_critical_exit();
+        return QUEUE_TIMED_OUT;
     }
  
     /* Woken because a receiver freed up space for us; we were already
@@ -294,7 +297,7 @@ queue_status kernel_queue_send(kernel_queue_t *q, const void *item, uint32_t tim
         woken->state = TASK_STATE_READY;
     }
  
-    CRITICAL_SECTION_EXIT();
+    port_critical_exit();
     return status;
 }
  
@@ -305,15 +308,15 @@ queue_status kernel_queue_send(kernel_queue_t *q, const void *item, uint32_t tim
  
 	Mirrors kernel_queue_send() -- see the comment above it for the blocking model.
  */
-queue_status kernel_queue_receive(kernel_queue_t *q, void *item, uint32_t timeout_ticks){
-    queue_status status;
+queue_status_t kernel_queue_receive(kernel_queue_t *q, void *item, uint32_t timeout_ticks){
+    queue_status_t status;
  
     if ((q == NULL) || (item == NULL))
     {
-        return failed;
+        return QUEUE_FAILED;
     }
  
-    CRITICAL_SECTION_ENTER();
+    port_critical_enter();
  
     if (q->count > 0U)
     {
@@ -327,15 +330,15 @@ queue_status kernel_queue_receive(kernel_queue_t *q, void *item, uint32_t timeou
             woken->state = TASK_STATE_READY;
         }
  
-        CRITICAL_SECTION_EXIT();
-        return passed;
+        port_critical_exit();
+        return QUEUE_PASSED;
     }
  
     if (timeout_ticks == 0U)
     {
         /* Queue empty and caller doesn't want to wait. */
-        CRITICAL_SECTION_EXIT();
-        return failed;
+        port_critical_exit();
+        return QUEUE_FAILED;
     }
  
     /* Queue is empty: block the calling task until data arrives or timeout expires.
@@ -346,17 +349,17 @@ queue_status kernel_queue_receive(kernel_queue_t *q, void *item, uint32_t timeou
     current_task->state = TASK_STATE_BLOCKED;
     task_queue_push_task(&q->receivers_waiting, current_task);
  
-    CRITICAL_SECTION_EXIT();
+    port_critical_exit();
  
     /* Give up the CPU; we resume here once woken (by a sender) or timed out. */
     kernel_yield();
  
-    CRITICAL_SECTION_ENTER();
+    port_critical_enter();
  
     if (current_task->timed_out)
     {
-        CRITICAL_SECTION_EXIT();
-        return timed_out;
+        port_critical_exit();
+        return QUEUE_TIMED_OUT;
     }
  
     /* Woken because a sender put something in for us; we were already
@@ -370,51 +373,6 @@ queue_status kernel_queue_receive(kernel_queue_t *q, void *item, uint32_t timeou
         woken->state = TASK_STATE_READY;
     }
  
-    CRITICAL_SECTION_EXIT();
+    port_critical_exit();
     return status;
-}
- 
-/* 
-	Scans blocked tasks waiting on queues, detects expired timeouts, removes timed-out tasks from their waiting queues, and
-	makes them ready for execution.
- 
-	No separate queue registry is needed: task_table[]/total_tasks (from
-	task.h) already lists every task, and a task blocked on a queue is
-	identifiable purely by (state == TASK_STATE_BLOCKED &&
-	current_wait_queue != NULL) -- tasks blocked via task_delay() instead
-	have current_wait_queue == NULL, so they're naturally skipped here.
- 
-	Timeout check is now against an absolute deadline (task->tick_counter,
-	repurposed to hold a deadline tick rather than a countdown) instead of
-	a decremented counter: a task has timed out once kernel_get_tick_count()
-	reaches its recorded deadline.
- 
-	Intended to be called once per tick from kernel_update_ticks(), after
-	the tick count has been incremented for the current tick.
-*/
-void kernel_tick_check_timeouts(void){
-    uint8_t i;
-    uint32_t now;
- 
-    CRITICAL_SECTION_ENTER();
- 
-    now = kernel_get_tick_count();
- 
-    for (i = 0U; i < total_tasks; i++)
-    {
-        TCB_t *task = &task_table[i];
- 
-        if ((task->state == TASK_STATE_BLOCKED) && (task->current_wait_queue != NULL))
-        {
-            if (task->tick_counter == now)
-            {
-                (void)task_queue_remove(task->current_wait_queue, task);
-                task->current_wait_queue = NULL;
-                task->timed_out = 1U;
-                task->state = TASK_STATE_READY;
-            }
-        }
-    }
- 
-    CRITICAL_SECTION_EXIT();
 }

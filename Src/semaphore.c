@@ -1,7 +1,7 @@
 #include "../Inc/semaphore.h"
 #include "../Inc/scheduler.h"
-
-queue_status kernel_sem_init(kernel_sem_t *sem, uint32_t initial_count, uint32_t max_count)
+#define SEM_INVALID_COUNT 0xFFFFFFFFU
+queue_status kernel_sem_init(kernel_sem_t &sem, uint32_t initial_count, uint32_t max_count)
 {
     if ((sem == NULL) || (max_count == 0U) || (initial_count > max_count))
     {
@@ -117,11 +117,11 @@ uint32_t kernel_sem_get_count(const kernel_sem_t *sem)
  
     if (sem == NULL)
     {
-        return 0U;
+        return SEM_INVALID_COUNT;
     }
  
     CRITICAL_SECTION_ENTER();
-    count = sem->count;
+    count = sem->count; // we need to return after the critical section enter so we need to keep as it is
     CRITICAL_SECTION_EXIT();
  
     return count;
