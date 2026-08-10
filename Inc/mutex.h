@@ -11,7 +11,7 @@ typedef struct
 {
     bool locked;               //Mutex State
     TCB_t *owner;              //Current Task Which is Owner of Mutex
-    task_queue_t Waiting_Tasks; //Task Waiting for Mutex 
+    task_queue_t waiting_tasks; //Task Waiting for Mutex 
 
 
 }kernel_mutex_t;

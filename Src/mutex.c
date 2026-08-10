@@ -32,11 +32,11 @@ mutex_status_t kernel_mutex_init(kernel_mutex_t *mutex)
      //Initialize the waiting task queue.
      //NULL head means no task is waiting.
      
-    mutex->waiting_tasks.head = NULL;
+    mutex->Waiting_Tasks.head = NULL;
 
 
     
-    mutex->waiting_tasks.tail = NULL;
+    mutex->Waiting_Tasks.tail = NULL;
 
 
     

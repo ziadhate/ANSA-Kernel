@@ -34,7 +34,7 @@ typedef enum{
 queue_status kernel_queue_init(kernel_queue_t *q, void *buffer, uint8_t capacity, uint16_t item_size);
 queue_status kernel_queue_push(kernel_queue_t *q, const void *data);
 queue_status kernel_queue_pop(kernel_queue_t *q, void *data);
-void task_queue_push_task(task_queue_t *q, TCB_t *task_tcb);
+int task_queue_push_task(task_queue_t *q, TCB_t *task_tcb);
 TCB_t *task_queue_pop_task(task_queue_t *q);
 bool task_queue_empty(task_queue_t *q);
 bool task_queue_remove(task_queue_t *q, TCB_t *task);

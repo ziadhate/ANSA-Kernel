@@ -61,88 +61,98 @@ queue_status kernel_queue_pop(kernel_queue_t *q, void *data)
     memcpy(data, &q->buffer[q->head*q->item_size], q->item_size);
     q->head = (q->head+1) % q->capacity;
     q->count--;
-    return failed;
+    return passed;
 }
  
 /*
-	Inserts a blocked task into a waiting queue in priority order (highest
-	priority first), preserving FIFO ordering among tasks of equal priority.
- 
-	NOTE: TCB_t->priority is a uint8_t with no fixed direction defined
-	elsewhere, so this assumes the convention "LARGER value == HIGHER
-	priority" (e.g. idle task created at priority 0 = lowest). If your
-	scheduler actually treats 0 as the highest priority instead, flip the
-	single comparison below (">=" -> "<=") -- nothing else needs to change.
- 
-	Because insertion keeps the list sorted, task_queue_pop_task() can stay
-	a simple "pop the head" operation and still always return the
-	highest-priority waiting task.
+	Inserts a blocked task at the end of a waiting queue, preserving FIFO
+	arrival order. Priority ordering is handled by task_queue_pop_task()
+	at removal time instead of at insertion time (see comment there).
 */
-void task_queue_push_task(task_queue_t *q, TCB_t *task_tcb){
-	TCB_t *prev;
-	TCB_t *curr;
- 
-	if ((q == NULL) || (task_tcb == NULL)){
-		return;
-	}
- 
-	task_tcb->next = NULL;
- 
-	if (q->head == NULL)
-	{
-		q->head = task_tcb;
-		q->tail = task_tcb;
-		return;
-	}
- 
-	prev = NULL;
-	curr = q->head;
- 
-	/* Walk forward while curr is same-or-higher priority than task_tcb,
-	   so task_tcb is inserted after all existing tasks of equal or
-	   greater priority (stable FIFO ordering within the same priority). */
-	while ((curr != NULL) && (curr->priority >= task_tcb->priority))
-	{
-		prev = curr;
-		curr = curr->next;
-	}
- 
-	if (prev == NULL)
-	{
-		/* task_tcb outranks everyone currently in the queue. */
-		task_tcb->next = q->head;
-		q->head = task_tcb;
-	}
-	else
-	{
-		task_tcb->next = curr;
-		prev->next = task_tcb;
- 
-		if (curr == NULL)
-		{
-			/* Inserted at the end. */
-			q->tail = task_tcb;
-		}
-	}
+
+int task_queue_push_task(task_queue_t *q, TCB_t *task_tcb){
+    if ((q == NULL) || (task_tcb == NULL))
+    {
+        return -1;
+    }
+
+    task_tcb->next = NULL;
+
+    if (q->tail == NULL)
+    {
+        q->head = task_tcb;
+        q->tail = task_tcb;
+    }
+    else
+    {
+        q->tail->next = task_tcb;
+        q->tail = task_tcb;
+    }
+
+    return 0;
 }
  
-// Removes and returns the highest-priority task from a waiting queue (the head, kept sorted by task_queue_push_task) while maintaining queue consistency.
+/*
+	Removes and returns the highest-priority task from a waiting queue,
+	scanning the whole (FIFO-ordered) list rather than just popping the
+	head. Ties are broken in favor of whichever equal-priority task has
+	been waiting longest (i.e. appears earliest), by using a strict "<"
+	comparison so the first min-value (highest-priority) node found
+	during the left-to-right scan wins.
+ 
+	NOTE: TCB_t->priority is a uint8_t with no fixed direction defined
+	elsewhere, so this assumes the convention "SMALLER value == HIGHER
+	priority" (e.g. priority 0 is the most urgent, larger numbers are
+	lower priority -- idle task would be created at the highest number).
+	If your scheduler actually treats larger values as higher priority
+	instead, flip the comparison below ("<" -> ">") -- nothing else needs
+	to change.
+*/
 TCB_t *task_queue_pop_task(task_queue_t *q){
+    TCB_t *curr;
+    TCB_t *curr_prev;
+    TCB_t *best;
+    TCB_t *best_prev;
+ 
     if ((q == NULL) || (q->head == NULL))
     {
         return NULL;
     }
  
-    TCB_t *task = q->head;
-    q->head = task->next;
+    best = q->head;
+    best_prev = NULL;
  
-    if (q->head == NULL)
+    curr_prev = q->head;
+    curr = q->head->next;
+ 
+    while (curr != NULL)
     {
-        q->tail = NULL;
+        if (curr->priority < best->priority)
+        {
+            best = curr;
+            best_prev = curr_prev;
+        }
+ 
+        curr_prev = curr;
+        curr = curr->next;
     }
  
-    task->next = NULL;
-    return task;
+    if (best_prev == NULL)
+    {
+        q->head = best->next;
+    }
+    else
+    {
+        best_prev->next = best->next;
+    }
+ 
+    if (best == q->tail)
+    {
+        q->tail = best_prev;
+    }
+ 
+    best->next = NULL;
+    return best;
 }
  
 // Checks whether the specified waiting queue contains any blocked tasks.
@@ -200,14 +210,19 @@ bool task_queue_remove(task_queue_t *q, TCB_t *task){
 	  - Blocking is done by setting current_task->state = TASK_STATE_BLOCKED,
 	    recording current_wait_queue + an absolute deadline tick in
 	    current_task->tick_counter (kernel_get_tick_count() + timeout_ticks),
-	    linking the task into the queue's wait list (in priority order),
-	    then calling kernel_yield() to force a context switch.
-	    kernel_yield() is assumed to block until this task is scheduled
-	    again (same pattern as task_delay()).
+	    linking the task into the queue's wait list (plain FIFO append --
+	    see task_queue_push_task()), then calling kernel_yield() to force a
+	    context switch. kernel_yield() is assumed to block until this task
+	    is scheduled again (same pattern as task_delay()).
 	  - Whichever side wakes a waiting task (either the opposite send/receive
-	    call, or kernel_tick_check_timeouts() on expiry) is responsible for
-	    unlinking it from the wait list and setting state back to READY --
-	    so a task never needs to remove itself from the list it was on.
+	    call via task_queue_pop_task(), or kernel_tick_check_timeouts() via
+	    task_queue_remove() on expiry) is responsible for unlinking it from
+	    the wait list and setting state back to READY -- so a task never
+	    needs to remove itself from the list it was on.
+	  - task_queue_pop_task() scans the wait list and removes the
+	    HIGHEST-PRIORITY task (not simply the first one that blocked) --
+	    see the comment on task_queue_pop_task() for the priority
+	    convention assumed.
 	  - task->timed_out distinguishes why we woke up.
 	  - tick_counter is now an ABSOLUTE deadline tick rather than a
 	    per-tick decremented countdown: kernel_tick_check_timeouts()
