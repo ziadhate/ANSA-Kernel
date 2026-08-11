@@ -15,7 +15,7 @@ void     kernel_start(void) __attribute__((noreturn));
 void     kernel_yield(void);
 void     kernel_update_ticks(void);
 uint32_t kernel_get_tick_count(void);
-void     scheduler_switch_context(void);
+void     scheduler_select_next_task(void);
 void task_delay(uint32_t delay_ticks);
 void task_delay_until(uint32_t *previous_wake_tick, uint32_t period);
 /* Converts system ticks to milliseconds */
