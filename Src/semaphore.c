@@ -23,6 +23,28 @@ queue_status_t kernel_sem_init(kernel_sem_t *sem, uint32_t initial_count, uint32
     return QUEUE_INIT_SUCCESS;
 }
 
+queue_status kernel_sem_set_max_count(kernel_sem_t *sem, uint32_t new_max_count)
+{
+    if (sem == NULL || new_max_count == 0U)
+    {
+        return failed;
+    }
+
+    CRITICAL_SECTION_ENTER();
+
+    // Prevent reducing max_count below current token count (or adjust logic as per your RTOS requirements)
+    if (new_max_count < sem->count)
+    {
+        CRITICAL_SECTION_EXIT();
+        return failed;
+    }
+
+    sem->max_count = new_max_count;
+
+    CRITICAL_SECTION_EXIT();
+    return passed;
+}
+
 queue_status_t kernel_sem_take(kernel_sem_t *sem, uint32_t timeout_ticks)
 {
     queue_status_t status;
