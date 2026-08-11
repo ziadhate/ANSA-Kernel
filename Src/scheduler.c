@@ -36,7 +36,7 @@ static TCB_t *pick_next_task(void)
 
     uint16_t best_priority = 256;
     int8_t best_id = -1;
-
+    // 0 1 2 3 4 5 6 7 8 
     /* Search all runnable tasks except the Idle Task */
     for (uint8_t offset = 1; offset <= count; offset++) {
 
@@ -66,7 +66,7 @@ static TCB_t *pick_next_task(void)
 }
 
 void scheduler_select_next_task(void) {
-    //if task is running and completed it is now send back to ready state
+    //if task is running and completed it is now sent back to ready state
     if ((current_task != NULL) && (current_task->state == TASK_STATE_RUNNING)) {
         current_task->state = TASK_STATE_READY;
     }
@@ -127,21 +127,22 @@ void kernel_yield(void) {
     port_trigger_context_switch();
 }
 
-
 void kernel_start(void) {
     //kernel_init();
  
     if (kernel_task_count() == 0U) {
-        while (1) { //cpu waits here instead of crashing till tasks are assigned 
+        while (1) { 
+            //cpu waits here instead of crashing till tasks are assigned 
         }
     }
- 
+
     current_task_id = -1;
-    current_task    = NULL; //  first context switch: no previous task to save
+    current_task = NULL; //  first context switch: no previous task to save
 
     port_start_first_task();
  
-    while (1) { // safety net if pendsv is not called or it fails 
+    while (1) {
+        // safety net if pendsv is not called or it fails 
     }
 }
 
@@ -161,21 +162,34 @@ void task_delay(uint32_t delay_ticks) {
     port_trigger_context_switch();
 }
 
-void task_delay_until(uint32_t *previous_wake_tick, uint32_t period){
-    if (previous_wake_tick == NULL || period==0)
+void task_delay_until(uint32_t *previous_wake_tick, uint32_t period_ticks)
+{
+    if (previous_wake_tick == NULL || period_ticks == 0U)
     {
         return;
     }
 
-    uint32_t next_wake = *previous_wake_tick + period;
-
     port_critical_enter();
-    current_task->wakeup_tick = next_wake;
+
+    uint32_t current_tick = kernel_get_tick_count();
+    uint32_t next_wake_tick = *previous_wake_tick + period_ticks;
+
+    /*
+        If the task has already missed its next release, it is not blocked
+    */
+    if ((int32_t)(current_tick - next_wake_tick) >= 0)
+    {
+        *previous_wake_tick = current_tick;
+        port_critical_exit();
+        return;
+    }
+
+    current_task->wakeup_tick = next_wake_tick;
     current_task->state = TASK_STATE_BLOCKED;
+
+    *previous_wake_tick = next_wake_tick;
+
     port_critical_exit();
-
-    *previous_wake_tick = next_wake;
-
     port_trigger_context_switch();
 }
 

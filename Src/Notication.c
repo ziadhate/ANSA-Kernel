@@ -1,5 +1,6 @@
 #include "../Inc/notification.h"
 #include "../Inc/scheduler.h"
+#include "../Port/Cortex_M4/Inc/port.h"
 #include <stddef.h>
 
 //===================================================================================================================================
@@ -11,14 +12,14 @@ notification_status_t kernel_notification_init(kernel_notification_t *notificati
         return NOTIFICATION_ERROR;
     }
 
-    CRITICAL_SECTION_ENTER(); // we entr this because we dont want any other task to modify the daa we are modifying right now
+    port_critical_enter(); // we entr this because we dont want any other task to modify the daa we are modifying right now
     //create a notification
     notification->pending = false;
 
     notification->waiters.head = NULL;
     notification->waiters.tail = NULL;
 
-    CRITICAL_SECTION_EXIT();
+    port_critical_exit();
 
     return NOTIFICATION_SUCCESS;
 }
@@ -38,14 +39,14 @@ notification_status_t kernel_notification_wait(kernel_notification_t *notificati
         return NOTIFICATION_ERROR;
     }
 
-    CRITICAL_SECTION_ENTER();
+    port_critical_enter();
 
     //check for existing notification
     if (notification->pending) //means there is already a notification , then dont block the task
     {
         notification->pending = false;
 
-        CRITICAL_SECTION_EXIT();
+        port_critical_exit();
 
         return NOTIFICATION_SUCCESS;
     } // if not then go ahead
@@ -56,7 +57,7 @@ notification_status_t kernel_notification_wait(kernel_notification_t *notificati
 
     task_queue_push_task(&notification->waiters, current_task); //put the current into the notifications waiting queue
 
-    CRITICAL_SECTION_EXIT();
+    port_critical_exit();
 
     //give bac CPU to schedular to decide which task to run next
     kernel_yield();
@@ -66,7 +67,7 @@ notification_status_t kernel_notification_wait(kernel_notification_t *notificati
 
 
 //======================================================================================================================================
-//this will do the actual notifying,waking-up job
+//this will do the actual notifying and waking-up job
 notification_status_t kernel_notification_notify(kernel_notification_t *notification){
 
     if (notification == NULL)
@@ -74,18 +75,20 @@ notification_status_t kernel_notification_notify(kernel_notification_t *notifica
         return NOTIFICATION_ERROR;
     }
 
-    CRITICAL_SECTION_ENTER();
+    port_critical_enter();
 
     /*
-     * If a task is waiting, wake one waiting task.
-     */
-    if (!task_queue_empty(&notification->waiters)) //task_queue_empty is a bool type , so should return 1/0
-    {
-        TCB_t *woken = task_queue_pop_task(&notification->waiters); //push the waiting task into the waiting queue
+        If a task is waiting, wake one waiting task.
+    */
+    bool yield_requested=false;
 
-        if (woken == NULL) // check if task pushed or not 
+    if (!task_queue_empty(&notification->waiters)) //task_queue_empty is a bool type , so should return true/false
+    {
+        TCB_t *woken = task_queue_pop_task(&notification->waiters); //pop the waiting task from the waiting queue
+
+        if (woken == NULL) // check if task popped or not 
         {
-            CRITICAL_SECTION_EXIT();
+            port_critical_exit();
 
             return NOTIFICATION_ERROR;
         }
@@ -93,19 +96,22 @@ notification_status_t kernel_notification_notify(kernel_notification_t *notifica
         //unblocking the task
         woken->current_wait_queue = NULL; // removing the task from waiting queue
         woken->state = TASK_STATE_READY; // task unblocked
+
+        yield_requested=true;
     }
     else //no task is waiting , since waiter is NULL 
     {
         notification->pending = true;
     }
 
-    CRITICAL_SECTION_EXIT();
+    port_critical_exit();
 
     /*
-     * Allow scheduler to decide whether
-     * the newly READY task should run.
-     */
-    kernel_yield();
+        Allow scheduler to decide whether the newly READY task should run.
+    */
+    if(yield_requested){
+        kernel_yield();
+    }
 
     return NOTIFICATION_SUCCESS;
 }

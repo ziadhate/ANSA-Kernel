@@ -32,23 +32,15 @@ typedef enum
     QUEUE_TIMED_OUT
 } queue_status_t;
 
-<<<<<<< HEAD
-queue_status kernel_queue_init(kernel_queue_t *q, void *buffer, uint8_t capacity, uint16_t item_size);
-queue_status kernel_queue_push(kernel_queue_t *q, const void *data);
-queue_status kernel_queue_pop(kernel_queue_t *q, void *data);
-int task_queue_push_task(task_queue_t *q, TCB_t *task_tcb);
-=======
 queue_status_t kernel_queue_init(kernel_queue_t *q, void *buffer, uint8_t capacity, uint16_t item_size);
 queue_status_t kernel_queue_push(kernel_queue_t *q, const void *data);
 queue_status_t kernel_queue_pop(kernel_queue_t *q, void *data);
 void task_queue_push_task(task_queue_t *q, TCB_t *task_tcb);
->>>>>>> 6b52e105fb5629fbf31170d9af30d42b07535610
 TCB_t *task_queue_pop_task(task_queue_t *q);
 bool task_queue_empty(task_queue_t *q);
 bool task_queue_remove(task_queue_t *q, TCB_t *task);
 queue_status_t kernel_queue_send(kernel_queue_t *q, const void *item, uint32_t timeout_ticks) ;
 queue_status_t kernel_queue_receive(kernel_queue_t *q, void *item, uint32_t timeout_ticks);
-void kernel_tick_check_timeouts(void);
 
 #endif
  

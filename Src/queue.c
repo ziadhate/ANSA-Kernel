@@ -61,102 +61,83 @@ queue_status_t kernel_queue_pop(kernel_queue_t *q, void *data)
     memcpy(data, &q->buffer[q->head*q->item_size], q->item_size);
     q->head = (q->head+1) % q->capacity;
     q->count--;
-<<<<<<< HEAD
-    return passed;
 
     return QUEUE_PASSED;
->>>>>>> 6b52e105fb5629fbf31170d9af30d42b07535610
 }
  
 /*
-	Inserts a blocked task at the end of a waiting queue, preserving FIFO
-	arrival order. Priority ordering is handled by task_queue_pop_task()
-	at removal time instead of at insertion time (see comment there).
+    Inserts a task into the waiting queue while maintaining ascending
+    priority order. Tasks with the same priority are kept in FIFO order,
+    meaning the task that arrived first is placed before later tasks with the same priority.
 */
-
-int task_queue_push_task(task_queue_t *q, TCB_t *task_tcb){
+void task_queue_push_task(task_queue_t *q, TCB_t *task_tcb)
+{
     if ((q == NULL) || (task_tcb == NULL))
     {
-        return -1;
+        return;
     }
 
     task_tcb->next = NULL;
 
-    if (q->tail == NULL)
+    /* Queue empty */
+    if (q->head == NULL)
     {
         q->head = task_tcb;
         q->tail = task_tcb;
-    }
-    else
-    {
-        q->tail->next = task_tcb;
-        q->tail = task_tcb;
+        return;
     }
 
-    return 0;
+    /* New task has the highest priority */
+    if (task_tcb->priority < q->head->priority)
+    {
+        task_tcb->next = q->head;
+        q->head = task_tcb;
+        return;
+    }
+
+    /* Find insertion position */
+    TCB_t *current = q->head;
+
+    while ((current->next != NULL) &&
+           (current->next->priority <= task_tcb->priority))
+    {
+        current = current->next;
+    }
+
+    task_tcb->next = current->next;
+    current->next = task_tcb;
+
+    /* New task was inserted at the end */
+    if (task_tcb->next == NULL)
+    {
+        q->tail = task_tcb;
+    }
 }
- 
+
 /*
-	Removes and returns the highest-priority task from a waiting queue,
-	scanning the whole (FIFO-ordered) list rather than just popping the
-	head. Ties are broken in favor of whichever equal-priority task has
-	been waiting longest (i.e. appears earliest), by using a strict "<"
-	comparison so the first min-value (highest-priority) node found
-	during the left-to-right scan wins.
- 
-	NOTE: TCB_t->priority is a uint8_t with no fixed direction defined
-	elsewhere, so this assumes the convention "SMALLER value == HIGHER
-	priority" (e.g. priority 0 is the most urgent, larger numbers are
-	lower priority -- idle task would be created at the highest number).
-	If your scheduler actually treats larger values as higher priority
-	instead, flip the comparison below ("<" -> ">") -- nothing else needs
-	to change.
+    Removes and returns the highest-priority task from the waiting queue.
+    The queue is already sorted by priority, so the task at the head
+    of the queue is always the next task to be released.
 */
-TCB_t *task_queue_pop_task(task_queue_t *q){
-    TCB_t *curr;
-    TCB_t *curr_prev;
-    TCB_t *best;
-    TCB_t *best_prev;
- 
+TCB_t *task_queue_pop_task(task_queue_t *q)
+{
     if ((q == NULL) || (q->head == NULL))
     {
         return NULL;
     }
- 
-    best = q->head;
-    best_prev = NULL;
- 
-    curr_prev = q->head;
-    curr = q->head->next;
- 
-    while (curr != NULL)
+
+    TCB_t *task = q->head;
+
+    q->head = task->next;
+
+    if (q->head == NULL)
     {
-        if (curr->priority < best->priority)
-        {
-            best = curr;
-            best_prev = curr_prev;
-        }
- 
-        curr_prev = curr;
-        curr = curr->next;
+        q->tail = NULL;
     }
- 
-    if (best_prev == NULL)
-    {
-        q->head = best->next;
-    }
-    else
-    {
-        best_prev->next = best->next;
-    }
- 
-    if (best == q->tail)
-    {
-        q->tail = best_prev;
-    }
- 
-    best->next = NULL;
-    return best;
+
+    task->next = NULL;
+
+    return task;
 }
  
 // Checks whether the specified waiting queue contains any blocked tasks.
@@ -165,7 +146,7 @@ bool task_queue_empty(task_queue_t *q){
 }
  
 // Removes a specific task from a waiting queue regardless of its position and updates the queue links accordingly.
-// Useful when we remove tasks based on a specific parameter (ex: priority)
+// Useful when we remove tasks based on a specific parameter (ex: emergency)
 bool task_queue_remove(task_queue_t *q, TCB_t *task){
     if ((q == NULL) || (task == NULL) || (q->head == NULL))
     {
@@ -241,7 +222,8 @@ queue_status_t kernel_queue_send(kernel_queue_t *q, const void *item, uint32_t t
     }
  
     port_critical_enter();
- 
+    
+    bool yield_requested=false;
     if (q->count < q->capacity)
     {
         /* Fast path: room available, no blocking needed. */
@@ -252,6 +234,16 @@ queue_status_t kernel_queue_send(kernel_queue_t *q, const void *item, uint32_t t
             TCB_t *woken = task_queue_pop_task(&q->receivers_waiting);
             woken->current_wait_queue = NULL;
             woken->state = TASK_STATE_READY;
+
+            if(woken->priority<current_task->priority){
+                yield_requested=true;
+            }
+
+            port_critical_exit();
+
+            if (yield_requested){
+                port_trigger_context_switch();
+            }
         }
  
         port_critical_exit();
@@ -264,18 +256,20 @@ queue_status_t kernel_queue_send(kernel_queue_t *q, const void *item, uint32_t t
         port_critical_exit();
         return QUEUE_FAILED;
     }
- 
-    /* Queue is full: block the calling task until space frees up or timeout expires.
-       tick_counter now holds an ABSOLUTE deadline tick, not a countdown. */
+
+    /* 
+        Queue is full: block the calling task until space frees up or timeout expires.
+        tick_counter now holds an ABSOLUTE deadline tick, not a countdown. 
+    */
     current_task->timed_out = 0U;
-    current_task->tick_counter = kernel_get_tick_count() + timeout_ticks;
+    current_task->wakeup_tick = kernel_get_tick_count() + timeout_ticks;
     current_task->current_wait_queue = &q->senders_waiting;
     current_task->state = TASK_STATE_BLOCKED;
     task_queue_push_task(&q->senders_waiting, current_task);
  
     port_critical_exit();
  
-    /* Give up the CPU; we resume here once woken (by a receiver) or timed out. */
+    /* Give up the CPU; we resume here once woken by a receiver or timed out. */
     kernel_yield();
  
     port_critical_enter();
@@ -286,17 +280,24 @@ queue_status_t kernel_queue_send(kernel_queue_t *q, const void *item, uint32_t t
         return QUEUE_TIMED_OUT;
     }
  
-    /* Woken because a receiver freed up space for us; we were already
-       unlinked from senders_waiting by whoever woke us. */
+    /*
+        Woken because a receiver freed up space for us;
+        We were already unlinked from senders_waiting by whoever woke us.
+    */
     status = kernel_queue_push(q, item);
- 
-    if (!task_queue_empty(&q->receivers_waiting))
-    {
-        TCB_t *woken = task_queue_pop_task(&q->receivers_waiting);
-        woken->current_wait_queue = NULL;
-        woken->state = TASK_STATE_READY;
+    if(status==QUEUE_PASSED){
+        if (!task_queue_empty(&q->receivers_waiting))
+        {
+            TCB_t *woken = task_queue_pop_task(&q->receivers_waiting);
+            woken->current_wait_queue = NULL;
+            woken->state = TASK_STATE_READY;
+
+            if(woken->priority<current_task->priority){
+                port_trigger_context_switch();
+            }
+        }
     }
- 
+
     port_critical_exit();
     return status;
 }
@@ -317,7 +318,8 @@ queue_status_t kernel_queue_receive(kernel_queue_t *q, void *item, uint32_t time
     }
  
     port_critical_enter();
- 
+    
+    bool yield_requested=false;
     if (q->count > 0U)
     {
         /* Fast path: data available, no blocking needed. */
@@ -328,9 +330,17 @@ queue_status_t kernel_queue_receive(kernel_queue_t *q, void *item, uint32_t time
             TCB_t *woken = task_queue_pop_task(&q->senders_waiting);
             woken->current_wait_queue = NULL;
             woken->state = TASK_STATE_READY;
+
+            if(woken->priority<current_task->priority){
+                yield_requested=true;
+            }
+            port_critical_exit();
+
+            if(yield_requested){
+                port_trigger_context_switch();
+            }
         }
  
-        port_critical_exit();
         return QUEUE_PASSED;
     }
  
@@ -342,9 +352,9 @@ queue_status_t kernel_queue_receive(kernel_queue_t *q, void *item, uint32_t time
     }
  
     /* Queue is empty: block the calling task until data arrives or timeout expires.
-       tick_counter now holds an ABSOLUTE deadline tick, not a countdown. */
+       wakeup_tick now holds an ABSOLUTE deadline tick, not a countdown. */
     current_task->timed_out = 0U;
-    current_task->tick_counter = kernel_get_tick_count() + timeout_ticks;
+    current_task->wakeup_tick = kernel_get_tick_count() + timeout_ticks;
     current_task->current_wait_queue = &q->receivers_waiting;
     current_task->state = TASK_STATE_BLOCKED;
     task_queue_push_task(&q->receivers_waiting, current_task);
@@ -365,14 +375,15 @@ queue_status_t kernel_queue_receive(kernel_queue_t *q, void *item, uint32_t time
     /* Woken because a sender put something in for us; we were already
        unlinked from receivers_waiting by whoever woke us. */
     status = kernel_queue_pop(q, item);
+    if(status==QUEUE_PASSED){
+        if (!task_queue_empty(&q->senders_waiting))
+        {
+            TCB_t *woken = task_queue_pop_task(&q->senders_waiting);
+            woken->current_wait_queue = NULL;
+            woken->state = TASK_STATE_READY;
+        }
  
-    if (!task_queue_empty(&q->senders_waiting))
-    {
-        TCB_t *woken = task_queue_pop_task(&q->senders_waiting);
-        woken->current_wait_queue = NULL;
-        woken->state = TASK_STATE_READY;
+        port_critical_exit();
+        return status;
     }
- 
-    port_critical_exit();
-    return status;
 }

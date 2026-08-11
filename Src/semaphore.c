@@ -1,14 +1,15 @@
 #include "../Inc/semaphore.h"
 #include "../Inc/scheduler.h"
+#include "../Port/Cortex_M4/Inc/port.h"
 #define SEM_INVALID_COUNT 0xFFFFFFFFU
-queue_status kernel_sem_init(kernel_sem_t &sem, uint32_t initial_count, uint32_t max_count)
+queue_status_t kernel_sem_init(kernel_sem_t *sem, uint32_t initial_count, uint32_t max_count)
 {
     if ((sem == NULL) || (max_count == 0U) || (initial_count > max_count))
     {
-        return init_failed;
+        return QUEUE_INIT_FAILED;
     }
  
-    CRITICAL_SECTION_ENTER();
+    port_critical_enter();
 
     //Rejects invalid situations
     sem->count     = initial_count;
@@ -18,34 +19,34 @@ queue_status kernel_sem_init(kernel_sem_t &sem, uint32_t initial_count, uint32_t
     sem->waiters.head = NULL; 
     sem->waiters.tail = NULL;
  
-    CRITICAL_SECTION_EXIT();
-    return init_success;
+    port_critical_exit();
+    return QUEUE_INIT_SUCCESS;
 }
 
-queue_status kernel_sem_take(kernel_sem_t *sem, uint32_t timeout_ticks)
+queue_status_t kernel_sem_take(kernel_sem_t *sem, uint32_t timeout_ticks)
 {
-    queue_status status;
+    queue_status_t status;
  
     if (sem == NULL)
     {
-        return failed;
+        return QUEUE_FAILED;
     }
  
-    CRITICAL_SECTION_ENTER();
+    port_critical_enter();
  
     if (sem->count > 0U)
     {
         // Fast path: a token is already available. 
         sem->count--;
-        CRITICAL_SECTION_EXIT();
-        return passed;
+        port_critical_exit();
+        return QUEUE_PASSED;
     }
  
     if (timeout_ticks == 0U)
     {
         // No token and caller doesn't want to wait.
-        CRITICAL_SECTION_EXIT();
-        return failed;
+        port_critical_exit();
+        return QUEUE_FAILED;
     }
  
     // No token available return time out
@@ -55,48 +56,48 @@ queue_status kernel_sem_take(kernel_sem_t *sem, uint32_t timeout_ticks)
     current_task->state = TASK_STATE_BLOCKED; //BLOCK the task
     task_queue_push_task(&sem->waiters, current_task); // push task for getting ready
  
-    CRITICAL_SECTION_EXIT();
+    port_critical_exit();
  
     kernel_yield(); //context switch
  
-    CRITICAL_SECTION_ENTER();
+    port_critical_enter();
  
     if (current_task->timed_out)
     {
-        CRITICAL_SECTION_EXIT();
-        return timed_out;
+        port_critical_exit();
+        return QUEUE_TIMED_OUT;
     }
  
     if (sem->count > 0U)
     {
         sem->count--;
-        status = passed;
+        status = QUEUE_PASSED;
     }
     else
     {
         //Should not happen under normal operation but safety precautions
-        status = failed;
+        status = QUEUE_FAILED;
     }
  
-    CRITICAL_SECTION_EXIT();
+    port_critical_exit();
     return status;
 }
 
 //release tokens
-queue_status kernel_sem_give(kernel_sem_t *sem)
+queue_status_t kernel_sem_give(kernel_sem_t *sem)
 {
     if (sem == NULL)
     {
-        return failed;
+        return QUEUE_FAILED;
     }
  
-    CRITICAL_SECTION_ENTER();
+    port_critical_enter();
  
     if (sem->count >= sem->max_count) //check number of tokens is full
     {
         
-        CRITICAL_SECTION_EXIT();
-        return failed;
+        port_critical_exit();
+        return QUEUE_FAILED;
     }
  
     sem->count++; // if not full add tokens
@@ -108,8 +109,8 @@ queue_status kernel_sem_give(kernel_sem_t *sem)
         woken->state = TASK_STATE_READY;
     }
  
-    CRITICAL_SECTION_EXIT();
-    return passed;
+    port_critical_exit();
+    return QUEUE_PASSED;
 }
 uint32_t kernel_sem_get_count(const kernel_sem_t *sem)
 {
@@ -120,9 +121,9 @@ uint32_t kernel_sem_get_count(const kernel_sem_t *sem)
         return SEM_INVALID_COUNT;
     }
  
-    CRITICAL_SECTION_ENTER();
+    port_critical_enter();
     count = sem->count; // we need to return after the critical section enter so we need to keep as it is
-    CRITICAL_SECTION_EXIT();
+    port_critical_exit();
  
     return count;
 }
