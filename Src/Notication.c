@@ -87,6 +87,15 @@ notification_status_t kernel_notification_notify(kernel_notification_t *notifica
         TCB_t *woken = task_queue_pop_task(&notification->waiters); //pop the waiting task from the waiting queue
 
         if (woken == NULL) // check if task popped or not 
+    
+    // If a task is waiting, wake one waiting task.
+    if (!task_queue_empty(&notification->waiters)) //task_queue_empty is a bool type , so should return 1/0
+    {                                              // 1- queue is empty
+                                                   // 0- queue is not empty (in this case this block will execute and pop one task from the queue and wake it)
+        TCB_t *woken = task_queue_pop_task(&notification->waiters); //Remove-pop the first-highest-priority task from a waiting queue 
+                                                                    //and return a pointer to that task's TCB.
+
+        if (woken == NULL) // check if task poped or not 
         {
             port_critical_exit();
 
@@ -94,24 +103,29 @@ notification_status_t kernel_notification_notify(kernel_notification_t *notifica
         }
         
         //unblocking the task
-        woken->current_wait_queue = NULL; // removing the task from waiting queue
+        woken->current_wait_queue = NULL; // removing the current task from waiting queue
         woken->state = TASK_STATE_READY; // task unblocked
 
         yield_requested=true;
     }
     else //no task is waiting , since waiter is NULL 
+        //in this case we should save the notification for future API'S to consume the notification 
+        // In future "kernel_notification_wait" , can consume the saved notification because this function was waiting for a notification
     {
-        notification->pending = true;
+        notification->pending = true; // save the unused notification to pending state for future use
     }
 
     port_critical_exit();
 
-    /*
-        Allow scheduler to decide whether the newly READY task should run.
-    */
+    // if the if condition on line : 81 is true , then by the time when that block completes execution , there is a task ready and
+    // we are subjecting that task to be scheduled by the schedular as usual based on the priority this task has as compared to other tasks
+    // we do this by doing the below API call
     if(yield_requested){
         kernel_yield();
     }
 
+    
+
     return NOTIFICATION_SUCCESS;
+    }
 }
