@@ -23,6 +23,7 @@ typedef struct TCB_t{
     TaskFunction_t task_function;
     void *arg;
     uint8_t priority;
+    uint8_t base_priority;
     uint32_t period;
     TaskState_t state;
     uint32_t wakeup_tick;

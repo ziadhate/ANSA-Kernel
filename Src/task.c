@@ -65,6 +65,7 @@ task_create_status_t kernel_task_create(TaskFunction_t fn, void *arg, uint8_t pr
         task_table[id].task_function = fn;
         task_table[id].arg = arg;
         task_table[id].priority = priority;
+        task_table[id].base_priority = priority;
         task_table[id].period = period;
         task_table[id].state = TASK_STATE_READY;
         task_table[id].tick_counter  = 0;
