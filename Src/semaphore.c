@@ -67,6 +67,12 @@ queue_status_t kernel_sem_take(kernel_sem_t *sem, uint32_t timeout_ticks)
         return QUEUE_FAILED;
     }
 
+    if (current_task == NULL)
+    {
+        port_critical_exit();
+        return QUEUE_FAILED;
+    }
+
     // Block current task
     current_task->timed_out = 0U;
     current_task->tick_counter = kernel_get_tick_count() + timeout_ticks;
@@ -84,7 +90,7 @@ queue_status_t kernel_sem_take(kernel_sem_t *sem, uint32_t timeout_ticks)
     port_critical_enter();
 
     // Always ensure the task is removed from the wait queue to prevent race conditions
-    task_queue_remove_task(&sem->waiters, current_task);
+    task_queue_remove(current_task->current_wait_queue, current_task);
     current_task->current_wait_queue = NULL;
 
     if (current_task->timed_out)
@@ -114,7 +120,7 @@ queue_status_t kernel_sem_give(kernel_sem_t *sem)
         woken->current_wait_queue = NULL;
         woken->state = TASK_STATE_READY;
         
-        scheduler_check_preemption(woken);
+        port_trigger_context_switch();
     }
     else
     {
