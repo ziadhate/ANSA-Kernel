@@ -32,7 +32,7 @@ typedef struct TCB_t{
     uint32_t *stack_base;                   //starting memory of task
     uint32_t stack_words;                   //size of stack 32 words = 128bytes (1 word = 4 bytes)
     kernel_mutex_t *owned_mutexes;   // Linked list of mutexes owned by this task
-    kernel_mutex_t *blocked_on
+    kernel_mutex_t *blocked_on;
     // Added for queue support
     struct TCB_t *next; // Pointer to the next task in a waiting queue.
     task_queue_t *current_wait_queue; // // Queue on which the task is currently blocked.
