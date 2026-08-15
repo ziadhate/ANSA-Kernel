@@ -35,5 +35,9 @@ notification_status_t kernel_notification_wait(kernel_notification_t *notificati
 //this is the actual messenger that tells a task to wake up from sleep mode/blocked mode
 notification_status_t kernel_notification_notify(kernel_notification_t *notification);
 
+//ISR safe API
+notification_status_t kernel_notification_wait_from_isr(kernel_notification_t *notification);
+notification_status_t kernel_notification_notify_from_isr(kernel_notification_t *notification);
+
 #endif
 

@@ -1,4 +1,4 @@
-#include "../Inc/notification.h"
+#include "../Inc/Notification.h"
 #include "../Inc/scheduler.h"
 #include "../Port/Cortex_M4/Inc/port.h"
 #include <stddef.h>
@@ -82,11 +82,7 @@ notification_status_t kernel_notification_notify(kernel_notification_t *notifica
     */
     bool yield_requested=false;
 
-    if (!task_queue_empty(&notification->waiters)) //task_queue_empty is a bool type , so should return true/false
-    {
-        TCB_t *woken = task_queue_pop_task(&notification->waiters); //pop the waiting task from the waiting queue
 
-        if (woken == NULL) // check if task popped or not 
     
     // If a task is waiting, wake one waiting task.
     if (!task_queue_empty(&notification->waiters)) //task_queue_empty is a bool type , so should return 1/0
@@ -128,4 +124,60 @@ notification_status_t kernel_notification_notify(kernel_notification_t *notifica
 
     return NOTIFICATION_SUCCESS;
     }
-}
+
+
+
+    //ISR safe API'S implementation
+
+    //======================================================================================================================================================
+    notification_status_t kernel_notification_wait_from_isr(kernel_notification_t *notification){
+    if (notification == NULL){
+        return NOTIFICATION_ERROR;
+    }
+
+    if (notification->pending){
+        notification->pending = false; // consume the notification and change its status
+        return NOTIFICATION_SUCCESS;
+    }
+    else{                              // no task should be kept in blocked state to wait for the notification
+        return NOTIFICATION_EMPTY;
+    }
+
+    }
+
+    //=========================================================================================================================================================
+    notification_status_t kernel_notification_notify_from_isr(kernel_notification_t *notification){
+    if (notification == NULL) //check for bad notification pointer passed
+    {
+        return NOTIFICATION_ERROR;
+    }
+
+    bool yield_requested = false;
+
+    if (!task_queue_empty(&notification->waiters)){                                   
+        TCB_t *woken = task_queue_pop_task(&notification->waiters); 
+
+        if (woken == NULL)
+        {
+            return NOTIFICATION_ERROR;
+        }
+
+        woken->current_wait_queue = NULL;
+        woken->state = TASK_STATE_READY;
+
+        if ((current_task != NULL) && (woken->priority < current_task->priority)){ //means woken task is having more priority , lesser no means more priority , then it needs to be scheduled
+            yield_requested = true; 
+        }
+    }
+    else        
+    {
+        notification->pending = true;
+    }
+
+    kernel_yield_from_isr(yield_requested);
+
+    return NOTIFICATION_SUCCESS;
+    }
+
+    //=============================================================================================================================================================================
+
