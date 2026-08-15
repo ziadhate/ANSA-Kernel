@@ -147,7 +147,7 @@ uint32_t kernel_sem_get_count(const kernel_sem_t *sem)
     return count;
 }
 
-queue_status_t kernel_sem_give_from_isr(kernel_sem_t *sem, uint8_t *px_higher_priority_task_woken)
+queue_status_t kernel_sem_give_from_isr(kernel_sem_t *sem, bool *px_higher_priority_task_woken)
 {
     if (sem == NULL)
     {
@@ -168,19 +168,13 @@ queue_status_t kernel_sem_give_from_isr(kernel_sem_t *sem, uint8_t *px_higher_pr
         woken->current_wait_queue = NULL;
         woken->state = TASK_STATE_READY;
 
-        /* Lower numeric value = higher priority (see pick_next_task).
-           Only ask the caller to yield if the woken task actually
-           outranks whatever task was interrupted. */
         if ((px_higher_priority_task_woken != NULL) &&
             (current_task != NULL) &&
             (woken->priority < current_task->priority))
         {
-            *px_higher_priority_task_woken = 1U;
+            *px_higher_priority_task_woken = true;
         }
 
-        /* Deliberately NOT calling port_trigger_context_switch() here.
-           Caller pends PendSV once, after ISR cleanup, via
-           kernel_yield_from_isr(). */
     }
     else
     {
