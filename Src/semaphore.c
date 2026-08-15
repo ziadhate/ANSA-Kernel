@@ -13,7 +13,7 @@ queue_status_t kernel_sem_init(kernel_sem_t *sem, uint32_t initial_count, uint32
 
     port_critical_enter();
 
-    sem->count     = initial_count;
+    sem->count = initial_count;
     sem->max_count = max_count;
     sem->waiters.head = NULL;
     sem->waiters.tail = NULL;
@@ -52,7 +52,6 @@ queue_status_t kernel_sem_take(kernel_sem_t *sem, uint32_t timeout_ticks)
 
     port_critical_enter();
 
-    // Fast path: Token available immediately
     if (sem->count > 0U)
     {
         sem->count--;
@@ -60,32 +59,33 @@ queue_status_t kernel_sem_take(kernel_sem_t *sem, uint32_t timeout_ticks)
         return QUEUE_PASSED;
     }
 
-    // Non-blocking caller and no token available
     if (timeout_ticks == 0U)
     {
         port_critical_exit();
         return QUEUE_FAILED;
     }
 
-    // Block current task
+    if (current_task == NULL)
+    {
+        port_critical_exit();
+        return QUEUE_FAILED;
+    }
+
     current_task->timed_out = 0U;
-    current_task->tick_counter = kernel_get_tick_count() + timeout_ticks;
+    current_task->wakeup_tick = kernel_get_tick_count() + timeout_ticks;
     current_task->current_wait_queue = &sem->waiters;
     current_task->state = TASK_STATE_BLOCKED;
-    
     task_queue_push_task(&sem->waiters, current_task);
 
     port_critical_exit();
-
-    // Context switch to next ready task
     kernel_yield();
 
-    // Resumed execution after yield
     port_critical_enter();
-
-    // Always ensure the task is removed from the wait queue to prevent race conditions
-    task_queue_remove_task(&sem->waiters, current_task);
-    current_task->current_wait_queue = NULL;
+    if (current_task->current_wait_queue != NULL)
+    {
+        task_queue_remove(current_task->current_wait_queue, current_task);
+        current_task->current_wait_queue = NULL;
+    }
 
     if (current_task->timed_out)
     {
@@ -93,7 +93,6 @@ queue_status_t kernel_sem_take(kernel_sem_t *sem, uint32_t timeout_ticks)
         return QUEUE_TIMED_OUT;
     }
 
-    // Token was successfully handed off directly via kernel_sem_give()
     port_critical_exit();
     return QUEUE_PASSED;
 }
@@ -109,12 +108,16 @@ queue_status_t kernel_sem_give(kernel_sem_t *sem)
 
     if (!task_queue_empty(&sem->waiters))
     {
-        // Direct handoff: Transfer token directly to woken task without incrementing sem->count
         TCB_t *woken = task_queue_pop_task(&sem->waiters);
+        if (woken == NULL)
+        {
+            port_critical_exit();
+            return QUEUE_FAILED;
+        }
+
         woken->current_wait_queue = NULL;
         woken->state = TASK_STATE_READY;
-        
-        scheduler_check_preemption(woken);
+        port_trigger_context_switch();
     }
     else
     {
@@ -142,4 +145,79 @@ uint32_t kernel_sem_get_count(const kernel_sem_t *sem)
     port_critical_exit();
 
     return count;
+}
+
+queue_status_t kernel_sem_give_from_isr(kernel_sem_t *sem, bool *px_higher_priority_task_woken)
+{
+    if (sem == NULL)
+    {
+        return QUEUE_FAILED;
+    }
+
+    port_critical_enter();
+
+    if (!task_queue_empty(&sem->waiters))
+    {
+        TCB_t *woken = task_queue_pop_task(&sem->waiters);
+        if (woken == NULL)
+        {
+            port_critical_exit();
+            return QUEUE_FAILED;
+        }
+
+        woken->current_wait_queue = NULL;
+        woken->state = TASK_STATE_READY;
+
+        if ((px_higher_priority_task_woken != NULL) &&
+            (current_task != NULL) &&
+            (woken->priority < current_task->priority))
+        {
+            *px_higher_priority_task_woken = true;
+        }
+
+    }
+    else
+    {
+        if (sem->count >= sem->max_count)
+        {
+            port_critical_exit();
+            return QUEUE_FAILED;
+        }
+        sem->count++;
+    }
+
+    port_critical_exit();
+    return QUEUE_PASSED;
+}
+
+queue_status_t kernel_sem_take_from_isr(kernel_sem_t *sem)
+{
+    if (sem == NULL)
+    {
+        return QUEUE_FAILED;
+    }
+
+    port_critical_enter();
+
+    if (sem->count > 0U)
+    {
+        sem->count--;
+        port_critical_exit();
+        return QUEUE_PASSED;
+    }
+
+    /* No blocking from ISR context — fail immediately. */
+    port_critical_exit();
+    return QUEUE_FAILED;
+}
+
+uint32_t kernel_sem_get_count_from_isr(const kernel_sem_t *sem)
+{
+    if (sem == NULL)
+    {
+        return SEM_INVALID_COUNT;
+    }
+
+    /* Single aligned 32-bit load is atomic on Cortex-M4 — no lock needed. */
+    return sem->count;
 }

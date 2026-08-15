@@ -146,6 +146,14 @@ void kernel_start(void) {
     }
 }
 
+void kernel_yield_from_isr(bool higher_priority_task_woken)
+{
+    if (higher_priority_task_woken)
+    {
+        port_trigger_context_switch();
+    }
+}
+
 
 void task_delay(uint32_t delay_ticks) {
     if (delay_ticks == 0U)

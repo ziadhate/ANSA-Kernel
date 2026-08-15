@@ -65,11 +65,17 @@ task_create_status_t kernel_task_create(TaskFunction_t fn, void *arg, uint8_t pr
         task_table[id].task_function = fn;
         task_table[id].arg = arg;
         task_table[id].priority = priority;
+        task_table[id].base_priority = priority;
         task_table[id].period = period;
         task_table[id].state = TASK_STATE_READY;
         task_table[id].tick_counter  = 0;
         task_table[id].stack_base = stack_base;
         task_table[id].stack_words = stack_words;
+        task_table[id].owned_mutexes = NULL;
+        task_table[id].blocked_on = NULL;
+        task_table[id].current_wait_queue = NULL;
+        task_table[id].timed_out = 0U;
+        task_table[id].next = NULL;
  
         total_tasks++;
     }

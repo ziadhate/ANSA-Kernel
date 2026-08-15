@@ -13,6 +13,9 @@ queue_status_t kernel_sem_init(kernel_sem_t *sem, uint32_t initial_count,uint32_
 queue_status_t kernel_sem_take(kernel_sem_t *sem, uint32_t timeout_ticks);
 queue_status_t kernel_sem_give(kernel_sem_t *sem);
 uint32_t kernel_sem_get_count(const kernel_sem_t *sem);
-queue_status kernel_sem_set_max_count(kernel_sem_t *sem, uint32_t new_max_count);
+queue_status_t kernel_sem_set_max_count(kernel_sem_t *sem, uint32_t new_max_count);
+queue_status_t kernel_sem_give_from_isr(kernel_sem_t *sem, bool *px_higher_priority_task_woken);
+queue_status_t kernel_sem_take_from_isr(kernel_sem_t *sem);
+uint32_t kernel_sem_get_count_from_isr(const kernel_sem_t *sem);
 
 #endif
