@@ -7,7 +7,7 @@
 #include <task.h>
 #include <queue.h>
 
-typedef struct
+typedef struct kernel_mutex_t
 {
     bool locked;               //Mutex State
     TCB_t *owner;              //Current Task Which is Owner of Mutex
