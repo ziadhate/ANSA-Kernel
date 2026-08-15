@@ -17,10 +17,10 @@ static volatile uint32_t g_tick_count = 0;
 
 void kernel_init(void) {
     task_pool_init();
-    idle_task_create();
+    //idle_task_create();
  
     // 1ms tick
-    port_systick_init(TICK_RATE_HZ);
+    //port_systick_init(TICK_RATE_HZ);
 }
 
 static TCB_t *pick_next_task(void)
@@ -128,22 +128,22 @@ void kernel_yield(void) {
 }
 
 void kernel_start(void) {
-    //kernel_init();
- 
     if (kernel_task_count() == 0U) {
-        while (1) { 
-            //cpu waits here instead of crashing till tasks are assigned 
-        }
+        while (1) {}
     }
 
+    /* Create Idle Task LAST so it reliably occupies (total_tasks - 1) */
+    idle_task_create();
+
+    /* Initialize SysTick to 1ms */
+    port_systick_init(TICK_RATE_HZ);
+
     current_task_id = -1;
-    current_task = NULL; //  first context switch: no previous task to save
+    current_task = NULL;
 
     port_start_first_task();
  
-    while (1) {
-        // safety net if pendsv is not called or it fails 
-    }
+    while (1) {}
 }
 
 void kernel_yield_from_isr(bool higher_priority_task_woken)
