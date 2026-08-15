@@ -1,16 +1,9 @@
 #include "port.h"
-#include "scheduler.h"   /* current_task, next_task, scheduler_switch_context(),
-                             kernel_update_ticks() — the portable side */
+#include "scheduler.h"
 
-// Those don't need to be visible outside
 #define SCB_ICSR        (*(volatile uint32_t *)(0xE000ED04UL))
 #define ICSR_PENDSVSET  (1UL << 28)
 
-/*
-	Maintenue par system_stm32l4xx.c / SystemCoreClockUpdate().
-	Reflète toujours la fréquence système réelle (post-PLL), peu
-	importe la config d'horloge choisie dans SystemClock_Config().
-*/
 extern uint32_t SystemCoreClock;
 
 static volatile uint32_t critical_nesting = 0;
@@ -42,18 +35,21 @@ void port_systick_init(uint32_t tick_rate_hz)
 {
     SysTick_LOAD = (SystemCoreClock / tick_rate_hz) - 1;
     SysTick_VAL  = 0;
-    SysTick_CTRL = (1 << 2)   /* CLKSOURCE */
-                 | (1 << 1)   /* SysTick interrupt */
-                 | (1 << 0);  /* ENABLE */
+    SysTick_CTRL = (1 << 2)   /* CLKSOURCE = CPU clock */
+                 | (1 << 1)   /* SysTick exception request enable */
+                 | (1 << 0);  /* Counter enable */
 
-    /* PendSV at the lowest priority */
+    /* PendSV priority set to the lowest (0xFF) */
     SCB_SHPR3 |= (0xFF << 16);
 }
 
 void port_start_first_task(void)
 {
+    /* Reset PSP to 0 so PendSV knows there is no running task to save */
     __asm volatile ("movs r0, #0");
     __asm volatile ("msr psp, r0");
+
+    critical_nesting = 0;
 
     SCB_ICSR = ICSR_PENDSVSET;
     __asm volatile ("cpsie i" ::: "memory");
@@ -61,26 +57,26 @@ void port_start_first_task(void)
 }
 
 uint32_t *port_stack_init(uint32_t *stack_top, void (*fn)(void *), void *arg) {
-    uint32_t *sp = stack_top;
- 
-    *(--sp) = 0x01000000UL;   // xPSR: thumb bit set  
-    *(--sp) = (uint32_t)fn;   // PC: task entry point                         
-    *(--sp) = 0xFFFFFFFDUL;   // LR: EXC_RETURN     
-    *(--sp) = 0x12121212UL;   // R12                                          
-    *(--sp) = 0x03030303UL;   // R3                                           
-    *(--sp) = 0x02020202UL;   // R2                                           
-    *(--sp) = 0x01010101UL;   // R1                                           
-    *(--sp) = (uint32_t)arg;  // R0: first argument to fn                     
- 
+    /* Ensure 8-byte stack alignment */
+    uint32_t *sp = (uint32_t *)((uint32_t)stack_top & ~7UL);
+
+    /* Hardware exception frame */
+    *(--sp) = 0x01000000UL;              /* xPSR: Thumb bit MUST be set */
+    *(--sp) = (uint32_t)fn | 1UL;        /* PC: Force Thumb bit (LSB = 1) */
+    *(--sp) = 0xFFFFFFFDUL;              /* LR: EXC_RETURN (Thread mode, PSP stack) */
+    *(--sp) = 0x12121212UL;              /* R12 */
+    *(--sp) = 0x03030303UL;              /* R3 */
+    *(--sp) = 0x02020202UL;              /* R2 */
+    *(--sp) = 0x01010101UL;              /* R1 */
+    *(--sp) = (uint32_t)arg;             /* R0: Task parameter */
+
+    /* Software saved registers (R4-R11) */
     for (int i = 0; i < 8; i++) {
-        *(--sp) = 0x00000000UL; // R4-R1
+        *(--sp) = 0x00000000UL;
     }
- 
+
     return sp;
 }
-
-
-/* --- Interrupt handlers: hardware entry points, must stay here --- */
 
 __attribute__((naked)) void PendSV_Handler(void)
 {
@@ -89,26 +85,26 @@ __attribute__((naked)) void PendSV_Handler(void)
         "mrs     r0, psp                    \n"
         "cbz     r0, save_done              \n"
 
-        "stmdb   r0!, {r4-r11}              \n" /* save R4-R11 to old task's stack */
+        "stmdb   r0!, {r4-r11}              \n" /* Save R4-R11 to previous task PSP */
         "ldr     r1, =current_task          \n"
         "ldr     r1, [r1]                   \n"
-        "str     r0, [r1]                   \n" /* current_task->sp = r0 (sp is 1st member) */
+        "str     r0, [r1]                   \n" /* current_task->sp = r0 */
 
         "save_done:                         \n"
         "push    {lr}                       \n"
-        "bl      scheduler_select_next_task   \n"
+        "bl      scheduler_select_next_task \n"
         "pop     {lr}                       \n"
 
         "ldr     r1, =current_task          \n"
         "ldr     r2, =next_task             \n"
         "ldr     r2, [r2]                   \n"
-        "str     r2, [r1]                   \n" /* current_task = next_task        */
+        "str     r2, [r1]                   \n" /* current_task = next_task */
 
-        "ldr     r0, [r2]                   \n" /* r0 = next_task->sp              */
-        "ldmia   r0!, {r4-r11}              \n" /* restore R4-R11 for the new task */
+        "ldr     r0, [r2]                   \n" /* r0 = next_task->sp */
+        "ldmia   r0!, {r4-r11}              \n" /* Restore R4-R11 */
         "msr     psp, r0                    \n"
 
-        "ldr     lr, =0xFFFFFFFD            \n" /* force: Thread mode, use PSP     */
+        "ldr     lr, =0xFFFFFFFD            \n" /* Return to Thread mode on PSP */
         "cpsie   i                          \n"
         "bx      lr                         \n"
     );
@@ -121,5 +117,5 @@ void port_idle(void)
 
 void SysTick_Handler(void)
 {
-    kernel_update_ticks();   // g_tick_count++ now lives in scheduler.c, exposed via kernel_get_tick_count()
+    kernel_update_ticks();
 }
