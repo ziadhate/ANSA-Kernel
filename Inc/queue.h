@@ -41,6 +41,8 @@ bool task_queue_empty(task_queue_t *q);
 bool task_queue_remove(task_queue_t *q, TCB_t *task);
 queue_status_t kernel_queue_send(kernel_queue_t *q, const void *item, uint32_t timeout_ticks) ;
 queue_status_t kernel_queue_receive(kernel_queue_t *q, void *item, uint32_t timeout_ticks);
+queue_status_t kernel_queue_send_from_isr(kernel_queue_t *q, const void *item);
+queue_status_t kernel_queue_receive_from_isr(kernel_queue_t *q, void *item);
 
 #endif
  

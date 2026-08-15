@@ -387,3 +387,73 @@ queue_status_t kernel_queue_receive(kernel_queue_t *q, void *item, uint32_t time
         return status;
     }
 }
+
+queue_status_t kernel_queue_send_from_isr(kernel_queue_t *q, const void *item)
+{
+    if ((q == NULL) || (item == NULL))
+    {
+        return QUEUE_FAILED;
+    }
+
+    /* ISR-safe API: Never block. If the queue is full, return immediately */
+    if (q->count >= q->capacity)
+    {
+        return QUEUE_FAILED;
+    }
+
+    (void)kernel_queue_push(q, item);
+
+    /* Wake one receiver waiting for data */
+    bool yield_requested=false;
+    if (!task_queue_empty(&q->receivers_waiting))
+    {
+        TCB_t *woken = task_queue_pop_task(&q->receivers_waiting);
+
+        woken->current_wait_queue = NULL;
+        woken->state = TASK_STATE_READY;
+
+        /* Request a context switch if the awakened task has a higher priority */
+        if ((current_task != NULL) && (woken->priority < current_task->priority))
+        {
+            yield_requested=true;
+        }
+    }
+    kernel_yield_from_isr(yield_requested);
+
+    return QUEUE_PASSED;
+}
+
+queue_status_t kernel_queue_receive_from_isr(kernel_queue_t *q, void *item)
+{
+    if ((q == NULL) || (item == NULL))
+    {
+        return QUEUE_FAILED;
+    }
+
+    /* ISR-safe API: Never block. If the queue is empty, return immediately */
+    if (q->count == 0U)
+    {
+        return QUEUE_FAILED;
+    }
+
+    (void)kernel_queue_pop(q, item);
+
+    /* Wake one sender waiting for free space */
+    bool yield_requested=false;
+    if (!task_queue_empty(&q->senders_waiting))
+    {
+        TCB_t *woken = task_queue_pop_task(&q->senders_waiting);
+
+        woken->current_wait_queue = NULL;
+        woken->state = TASK_STATE_READY;
+
+        /* Request a context switch if the awakened task has a higher priority */
+        if ((current_task != NULL) && (woken->priority < current_task->priority))
+        {
+            yield_requested=true;
+        }
+    }
+    kernel_yield_from_isr(yield_requested);
+
+    return QUEUE_PASSED;
+}
