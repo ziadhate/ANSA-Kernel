@@ -1,3 +1,0 @@
-C:/Users/HP/Downloads/STM/Nucleo-L4/workspace_1.19.0/vscode_example/Debug/CMakeFiles/vscode_example.dir
-C:/Users/HP/Downloads/STM/Nucleo-L4/workspace_1.19.0/vscode_example/Debug/CMakeFiles/edit_cache.dir
-C:/Users/HP/Downloads/STM/Nucleo-L4/workspace_1.19.0/vscode_example/Debug/CMakeFiles/rebuild_cache.dir
