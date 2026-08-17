@@ -227,7 +227,7 @@ queue_status_t kernel_queue_send(kernel_queue_t *q, const void *item, uint32_t t
     if (q->count < q->capacity)
     {
         /* Fast path: room available, no blocking needed. */
-        (void)kernel_queue_push(q, item);
+        status=kernel_queue_push(q, item);
  
         if (!task_queue_empty(&q->receivers_waiting))
         {
@@ -238,16 +238,15 @@ queue_status_t kernel_queue_send(kernel_queue_t *q, const void *item, uint32_t t
             if(woken->priority<current_task->priority){
                 yield_requested=true;
             }
-
-            port_critical_exit();
-
-            if (yield_requested){
-                port_trigger_context_switch();
-            }
         }
- 
+
         port_critical_exit();
-        return QUEUE_PASSED;
+
+        if (yield_requested){
+            port_trigger_context_switch();
+        }
+    
+        return status;
     }
  
     if (timeout_ticks == 0U)
@@ -270,7 +269,7 @@ queue_status_t kernel_queue_send(kernel_queue_t *q, const void *item, uint32_t t
     port_critical_exit();
  
     /* Give up the CPU; we resume here once woken by a receiver or timed out. */
-    kernel_yield();
+    port_trigger_context_switch();
  
     port_critical_enter();
  
@@ -293,12 +292,18 @@ queue_status_t kernel_queue_send(kernel_queue_t *q, const void *item, uint32_t t
             woken->state = TASK_STATE_READY;
 
             if(woken->priority<current_task->priority){
-                port_trigger_context_switch();
+                yield_requested=true;
             }
         }
     }
-
+    
     port_critical_exit();
+
+    if(yield_requested)
+    {
+        port_trigger_context_switch();
+    }
+
     return status;
 }
  
@@ -323,7 +328,7 @@ queue_status_t kernel_queue_receive(kernel_queue_t *q, void *item, uint32_t time
     if (q->count > 0U)
     {
         /* Fast path: data available, no blocking needed. */
-        (void)kernel_queue_pop(q, item);
+        status=kernel_queue_pop(q, item);
  
         if (!task_queue_empty(&q->senders_waiting))
         {
@@ -334,14 +339,15 @@ queue_status_t kernel_queue_receive(kernel_queue_t *q, void *item, uint32_t time
             if(woken->priority<current_task->priority){
                 yield_requested=true;
             }
-            port_critical_exit();
+        }
 
-            if(yield_requested){
-                port_trigger_context_switch();
-            }
+        port_critical_exit();
+
+        if(yield_requested){
+            port_trigger_context_switch();
         }
  
-        return QUEUE_PASSED;
+        return status;
     }
  
     if (timeout_ticks == 0U)
@@ -362,7 +368,7 @@ queue_status_t kernel_queue_receive(kernel_queue_t *q, void *item, uint32_t time
     port_critical_exit();
  
     /* Give up the CPU; we resume here once woken (by a sender) or timed out. */
-    kernel_yield();
+    port_trigger_context_switch();
  
     port_critical_enter();
  
@@ -375,17 +381,26 @@ queue_status_t kernel_queue_receive(kernel_queue_t *q, void *item, uint32_t time
     /* Woken because a sender put something in for us; we were already
        unlinked from receivers_waiting by whoever woke us. */
     status = kernel_queue_pop(q, item);
-    if(status==QUEUE_PASSED){
+    if(status==QUEUE_PASSED)
+    {
         if (!task_queue_empty(&q->senders_waiting))
         {
             TCB_t *woken = task_queue_pop_task(&q->senders_waiting);
             woken->current_wait_queue = NULL;
             woken->state = TASK_STATE_READY;
+            if (woken->priority < current_task->priority)
+            {
+                yield_requested=true;
+            }
         }
- 
-        port_critical_exit();
-        return status;
     }
+
+    port_critical_exit();
+
+    if(yield_requested){
+        port_trigger_context_switch();
+    }
+    return status;
 }
 
 queue_status_t kernel_queue_send_from_isr(kernel_queue_t *q, const void *item)

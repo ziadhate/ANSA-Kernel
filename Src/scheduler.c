@@ -15,12 +15,9 @@ static int8_t current_task_id = -1;
  */
 static volatile uint32_t g_tick_count = 0;
 
-void kernel_init(void) {
+void kernel_init(void)
+{
     task_pool_init();
-    //idle_task_create();
- 
-    // 1ms tick
-    //port_systick_init(TICK_RATE_HZ);
 }
 
 static TCB_t *pick_next_task(void)
@@ -36,7 +33,7 @@ static TCB_t *pick_next_task(void)
 
     uint16_t best_priority = 256;
     int8_t best_id = -1;
-    // 0 1 2 3 4 5 6 7 8 
+
     /* Search all runnable tasks except the Idle Task */
     for (uint8_t offset = 1; offset <= count; offset++) {
 
