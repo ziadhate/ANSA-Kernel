@@ -51,6 +51,13 @@ uint32_t kernel_sem_get_count(const kernel_sem_t *sem);
 queue_status_t kernel_sem_set_max_count(kernel_sem_t *sem, uint32_t new_max_count);
 
 /*
+  Changes the current number of available tokens in the semaphore.
+  new_count : New current token count
+  The new count must be greater than zero and must not exceed max_count.
+ */
+queue_status_t kernel_sem_set_count(kernel_sem_t *sem, uint32_t new_count);
+
+/*
   ISR-safe version of kernel_sem_give().
   Releases one semaphore token from interrupt context.
   px_higher_priority_task_woken is set to true if giving the

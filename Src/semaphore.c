@@ -43,6 +43,26 @@ queue_status_t kernel_sem_set_max_count(kernel_sem_t *sem, uint32_t new_max_coun
     return QUEUE_PASSED;
 }
 
+queue_status_t kernel_sem_set_count(kernel_sem_t *sem, uint32_t new_count){
+    if ((sem == NULL) || (new_count == 0U))
+    {
+        return QUEUE_FAILED;
+    }
+
+    port_critical_enter();
+
+    if (new_count > sem->max_count)
+    {
+        port_critical_exit();
+        return QUEUE_FAILED;
+    }
+
+    sem->count = new_count;
+
+    port_critical_exit();
+    return QUEUE_PASSED;
+}
+
 queue_status_t kernel_sem_take(kernel_sem_t *sem, uint32_t timeout_ticks)
 {
     if (sem == NULL)
