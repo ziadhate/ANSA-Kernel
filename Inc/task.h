@@ -100,6 +100,9 @@ task_create_status_t kernel_task_create(TaskFunction_t fn, void *arg, uint8_t pr
 /* Returns a pointer to the TCB associated with the given task ID */
 TCB_t *task_get_TCB(uint8_t id);
 
+/* Returns the task ID associated with the given TCB, or -1 if invalid */
+int8_t task_get_id(const TCB_t *task);
+
 /* Returns the current number of created tasks */
 uint8_t kernel_task_count(void);
 

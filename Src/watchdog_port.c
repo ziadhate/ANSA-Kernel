@@ -1,7 +1,8 @@
 #include "../Inc/port.h"
 #include <stdint.h>
 
-
+//This file i wrote specifically keeping in mind STM32L4 because Hardware watchdog reset is dependent on respective memory adresses 
+//do the corresponding change to this addresses if compiling for any other board
 //STM32L4 addresses i took from its memory map
 //STM32L4 IWDG
 //Base address: 0x40003000

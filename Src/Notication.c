@@ -27,40 +27,79 @@ notification_status_t kernel_notification_init(kernel_notification_t *notificati
 
 //=================================================================================================================================
 //make a task wait untill notification arrives
-notification_status_t kernel_notification_wait(kernel_notification_t *notification){
-
-    if (notification == NULL) //checking for bad notification pointer 
+notification_status_t kernel_notification_wait( kernel_notification_t *notification, uint32_t timeout_ticks)
+{
+    if (notification == NULL)
     {
         return NOTIFICATION_ERROR;
     }
 
-    if (current_task == NULL) // no current task found to be notified
+    if (current_task == NULL)
     {
         return NOTIFICATION_ERROR;
     }
 
     port_critical_enter();
 
-    //check for existing notification
-    if (notification->pending) //means there is already a notification , then dont block the task
+    /*
+     * A notification is already pending.
+     * Consume it immediately.
+     */
+    if (notification->pending)
     {
         notification->pending = false;
+        current_task->timed_out = 0U;
 
         port_critical_exit();
 
         return NOTIFICATION_SUCCESS;
-    } // if not then go ahead
+    }
 
-    //Store the address of this notification's waiter field into the waiting  queue inside Task's TCB.
-    current_task->current_wait_queue = &notification->waiters; // current task has to wait for notification in the queue specified by the notification's waiter field 
-    current_task->state = TASK_STATE_BLOCKED; // current task has been blocked beacuase no notification is available
+    /*
+     * Zero timeout means:
+     * check immediately without blocking.
+     */
+    if (timeout_ticks == 0U)
+    {
+        port_critical_exit();
 
-    task_queue_push_task(&notification->waiters, current_task); //put the current into the notifications waiting queue
+        return NOTIFICATION_EMPTY;
+    }
+
+    /*
+     * No notification is available.
+     * Block the current task until either:
+     * ---> A notification arrives, or
+     * ---> timeout_ticks expires.
+     */
+    current_task->timed_out = 0U;
+
+    current_task->wakeup_tick = kernel_get_tick_count() + timeout_ticks;
+
+    current_task->current_wait_queue = &notification->waiters;
+
+    current_task->state = TASK_STATE_BLOCKED;
+
+    task_queue_push_task(
+        &notification->waiters,
+        current_task
+    );
 
     port_critical_exit();
 
-    //give bac CPU to schedular to decide which task to run next
+    /*
+     * Give the CPU to another task.
+     */
     kernel_yield();
+
+    /*
+     * We have been scheduled again.
+     * Determine why we woke up.
+     */
+    if (current_task->timed_out)
+    {
+        return NOTIFICATION_EMPTY;
+    }
 
     return NOTIFICATION_SUCCESS;
 }
@@ -100,6 +139,7 @@ notification_status_t kernel_notification_notify(kernel_notification_t *notifica
         
         //unblocking the task
         woken->current_wait_queue = NULL; // removing the current task from waiting queue
+        woken->timed_out = 0U;            //task has just unblocked ,, so ticks have been reset
         woken->state = TASK_STATE_READY; // task unblocked
 
         yield_requested=true;

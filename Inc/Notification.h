@@ -1,8 +1,8 @@
 #ifndef NOTIFICATION_H
 #define NOTIFICATION_H
 
-//user includes
 #include <stdbool.h>
+#include <stdint.h>
 
 #include "queue.h"
 
@@ -30,7 +30,10 @@ typedef enum
 notification_status_t kernel_notification_init(kernel_notification_t *notification); // the pointer points to the notification object created
 
 //this fxn a task will call to be in sleep mode untill a notification has addressed them 
-notification_status_t kernel_notification_wait(kernel_notification_t *notification);
+notification_status_t kernel_notification_wait(
+    kernel_notification_t *notification, //pointer to notification
+    uint32_t timeout_ticks               //ticks to wait
+);
 
 //this is the actual messenger that tells a task to wake up from sleep mode/blocked mode
 notification_status_t kernel_notification_notify(kernel_notification_t *notification);

@@ -1,5 +1,6 @@
 #include "../Inc/scheduler.h"
 #include "../Inc/queue.h"
+#include "../Inc/watchdog.h" // added so that watchdog can be initialised
 #include <stddef.h>
 #include <stdint.h>
 
@@ -104,6 +105,11 @@ void kernel_update_ticks(void)
         }
     }
 
+    /* Added this and this will
+     * Check all registered watchdog tasks once per kernel tick.
+     */
+    kernel_watchdog_check();
+
     if (task_woken)
     {
         port_trigger_context_switch();
@@ -131,6 +137,13 @@ void kernel_start(void) {
 
     /* Create Idle Task LAST so it reliably occupies (total_tasks - 1) */
     idle_task_create();
+
+    /* THIS IS NEWLY ADDED 
+     * Initialize and start the kernel watchdog
+     * before the scheduler starts executing tasks.
+     */
+    kernel_watchdog_init();
+    kernel_watchdog_start();
 
     /* Initialize SysTick to 1ms */
     port_systick_init(TICK_RATE_HZ);
