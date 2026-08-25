@@ -69,6 +69,7 @@ task_create_status_t kernel_task_create(TaskFunction_t fn, void *arg, uint8_t pr
         task_table[id].period = period;
         task_table[id].state = TASK_STATE_READY;
         task_table[id].tick_counter  = 0;
+        task_table[id].wakeup_tick  = 0;
         task_table[id].stack_base = stack_base;
         task_table[id].stack_words = stack_words;
         task_table[id].owned_mutexes = NULL;
