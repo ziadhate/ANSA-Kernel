@@ -5,17 +5,17 @@
 #include<stddef.h>
 
 /* Maximum number of tasks that can exist simultaneously */
-#define MAX_TASKS 8
+#define MAX_TASKS 20
 
 /* Total size of the memory pool dedicated to task stacks, in words */
-#define KERNEL_STACK_POOL_SIZE  2048
+#define KERNEL_STACK_POOL_SIZE  8192U
 
 /* Minimum stack size allowed for a task, in words */
 #define TASK_STACK_MIN_WORDS    32
 
 // Possible states of a task
 typedef enum {
-    TASK_STATE_READY,       // Task is ready to run and waiting for CPU time
+    TASK_STATE_READY=0,       // Task is ready to run and waiting for CPU time
     TASK_STATE_RUNNING,     // Task is currently executing on the CPU
     TASK_STATE_BLOCKED,     // Task is waiting for an event, resource, or timeout
     TASK_STATE_SUSPENDED,   // Task is suspended and cannot be scheduled
@@ -48,7 +48,6 @@ typedef struct TCB_t
     TaskState_t state;                  // Current state of the task
 
     uint32_t wakeup_tick;               // System tick at which a blocked task can wake up
-    uint32_t tick_counter;              // Tick counter used for task timing/period management
 
     uint32_t *stack_base;               // Base address of the task's stack
     uint32_t stack_words;               // Stack size in words (1 word = 4 bytes)
@@ -67,6 +66,12 @@ typedef struct TCB_t
 
     /* Indicates whether the task was unblocked because its waiting timeout expired */
     volatile uint8_t timed_out;
+    
+    /* Scratch pointer used only while this task is blocked inside
+       kernel_queue_send()/kernel_queue_receive(): the sender's source
+       buffer, or the receiver's destination buffer. NULL whenever the
+       task is not blocked on a queue. */
+    void *pending_item;
 
 } TCB_t;
 

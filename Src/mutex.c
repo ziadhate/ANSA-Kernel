@@ -233,7 +233,6 @@
             next_owner->state = TASK_STATE_READY;
             next_owner->blocked_on = NULL;
             next_owner->current_wait_queue = NULL;
-            next_owner->next = NULL;
 
             if(next_owner->priority < current_task->priority){
                 yield_requested=true;
@@ -282,19 +281,19 @@
         
 
         /* Check whether mutex is already locked */
-    if (mutex->locked == true)
-    {
-        if (mutex->owner == current_task)
+        if (mutex->locked == true)
         {
+            if (mutex->owner == current_task)
+            {
+                port_critical_exit();
+
+                return MUTEX_ERROR;
+            }
+
             port_critical_exit();
 
-            return MUTEX_ERROR;
+            return MUTEX_BUSY;
         }
-
-        port_critical_exit();
-
-        return MUTEX_BUSY;
-    }
 
         /* Mutex is free. Give ownership to current task */
         mutex->locked = true;

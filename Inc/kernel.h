@@ -13,7 +13,13 @@
 	Keep this order when adding new kernel headers to avoid type dependency and declaration-order issues.
 */
 
-#include "task.h"   	/* TCB_t, task states, task management */
-#include "queue.h"      /* Task queues and IPC queue types */
-#include "scheduler.h"  /* Scheduler APIs and kernel timing functions */
+#include "task.h"          /* Task Control Block, task states and task management */
+#include "queue.h"         /* Kernel queues and queue management */
+#include "scheduler.h"     /* Scheduler APIs and kernel timing functions */
+#include "mutex.h"         /* Mutex synchronization primitives */
+#include "semaphore.h"     /* Semaphore synchronization primitives */
+#include "Notification.h"  /* Task notification mechanisms */
+#include "mailbox.h"       /* Mailbox IPC mechanisms */
+#include "watchdog.h"      /* Watchdog management and supervision */
+
 #endif /* KERNEL_H */

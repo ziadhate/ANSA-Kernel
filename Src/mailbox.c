@@ -1,6 +1,6 @@
 #include "mailbox.h"
 #include <string.h>
-#include "/Port/Cortex_M4/Inc/port.h"
+#include "../Port/Cortex_M4/Inc/port.h"
 
 mailbox_status_t kernel_mailbox_init(kernel_mailbox_t *mb, uint32_t item_size)
 {
@@ -13,7 +13,7 @@ mailbox_status_t kernel_mailbox_init(kernel_mailbox_t *mb, uint32_t item_size)
     return MAILBOX_INIT_SUCCEED;
 }
 
-void kernel_mailbox_post(kernel_mailbox_t *mb, const void *item)
+void kernel_mailbox_send(kernel_mailbox_t *mb, const void *item)
 {
     port_critical_enter();
     memcpy(mb->buffer, item, mb->item_size);
@@ -21,7 +21,7 @@ void kernel_mailbox_post(kernel_mailbox_t *mb, const void *item)
     port_critical_exit();
 }
 
-mailbox_status_t kernel_mailbox_get(kernel_mailbox_t *mb, void *item)
+mailbox_status_t kernel_mailbox_receive(kernel_mailbox_t *mb, void *item)
 {
     mailbox_status_t result = MAILBOX_EMPTY;
 

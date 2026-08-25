@@ -194,8 +194,9 @@ bool task_queue_remove(task_queue_t *q, TCB_t *task){
 	  - current_task is the running task (extern in scheduler.h).
 	  - Blocking is done by setting current_task->state = TASK_STATE_BLOCKED,
 	    recording current_wait_queue + an absolute deadline tick in
-	    current_task->tick_counter (kernel_get_tick_count() + timeout_ticks),
-	    linking the task into the queue's wait list (plain FIFO append --
+	    current_task->wakeup_tick (kernel_get_tick_count() + timeout_ticks),
+	    linking the task into the queue's wait list (plain priority-based sorted append, 1st task is the 
+        Highest-priority task--
 	    see task_queue_push_task()), then calling kernel_yield() to force a
 	    context switch. kernel_yield() is assumed to block until this task
 	    is scheduled again (same pattern as task_delay()).
@@ -204,12 +205,10 @@ bool task_queue_remove(task_queue_t *q, TCB_t *task){
 	    task_queue_remove() on expiry) is responsible for unlinking it from
 	    the wait list and setting state back to READY -- so a task never
 	    needs to remove itself from the list it was on.
-	  - task_queue_pop_task() scans the wait list and removes the
-	    HIGHEST-PRIORITY task (not simply the first one that blocked) --
-	    see the comment on task_queue_pop_task() for the priority
-	    convention assumed.
+	  - task_queue_pop_task() removes the HIGHEST-PRIORITY task which is the first task --
+	    see the comment on task_queue_pop_task().
 	  - task->timed_out distinguishes why we woke up.
-	  - tick_counter is now an ABSOLUTE deadline tick rather than a
+	  - Wakeup_tick is now an ABSOLUTE deadline tick rather than a
 	    per-tick decremented countdown: kernel_tick_check_timeouts()
 	    simply compares kernel_get_tick_count() against it instead of
 	    counting down every tick.
@@ -222,22 +221,25 @@ queue_status_t kernel_queue_send(kernel_queue_t *q, const void *item, uint32_t t
     }
  
     port_critical_enter();
-    
-    bool yield_requested=false;
-    if (q->count < q->capacity)
-    {
-        /* Fast path: room available, no blocking needed. */
-        status=kernel_queue_push(q, item);
- 
-        if (!task_queue_empty(&q->receivers_waiting))
-        {
-            TCB_t *woken = task_queue_pop_task(&q->receivers_waiting);
-            woken->current_wait_queue = NULL;
-            woken->state = TASK_STATE_READY;
 
-            if(woken->priority<current_task->priority){
-                yield_requested=true;
-            }
+    bool yield_requested=false;
+
+    /*
+        Direct hand-off: a receiver is already blocked waiting for the
+        next item. Copy straight into its destination buffer instead of
+        going through the ring buffer, that gap (drop item, then wake
+        the receiver to come fetch it later) is what let a third task's
+        fast path steal the item before the woken receiver got to run.
+    */
+    if (!task_queue_empty(&q->receivers_waiting))
+    {
+        TCB_t *woken = task_queue_pop_task(&q->receivers_waiting);
+        memcpy(woken->pending_item, item, q->item_size);
+        woken->current_wait_queue = NULL;
+        woken->state = TASK_STATE_READY;
+
+        if(woken->priority<current_task->priority){
+            yield_requested=true;
         }
 
         port_critical_exit();
@@ -245,10 +247,20 @@ queue_status_t kernel_queue_send(kernel_queue_t *q, const void *item, uint32_t t
         if (yield_requested){
             port_trigger_context_switch();
         }
-    
+
+        return QUEUE_PASSED;
+    }
+
+    if (q->count < q->capacity)
+    {
+        /* Fast path: room available, nobody waiting, nothing to race with. */
+        status=kernel_queue_push(q, item);
+
+        port_critical_exit();
+
         return status;
     }
- 
+
     if (timeout_ticks == 0U)
     {
         /* Queue full and caller doesn't want to wait. */
@@ -263,48 +275,32 @@ queue_status_t kernel_queue_send(kernel_queue_t *q, const void *item, uint32_t t
     current_task->timed_out = 0U;
     current_task->wakeup_tick = kernel_get_tick_count() + timeout_ticks;
     current_task->current_wait_queue = &q->senders_waiting;
+    current_task->pending_item = (void *)item;   /* our source buffer, for whoever wakes us */
     current_task->state = TASK_STATE_BLOCKED;
     task_queue_push_task(&q->senders_waiting, current_task);
- 
+
     port_critical_exit();
- 
+
     /* Give up the CPU; we resume here once woken by a receiver or timed out. */
     port_trigger_context_switch();
- 
+
     port_critical_enter();
- 
+
+    current_task->pending_item = NULL;
+
     if (current_task->timed_out)
     {
         port_critical_exit();
         return QUEUE_TIMED_OUT;
     }
- 
-    /*
-        Woken because a receiver freed up space for us;
-        We were already unlinked from senders_waiting by whoever woke us.
-    */
-    status = kernel_queue_push(q, item);
-    if(status==QUEUE_PASSED){
-        if (!task_queue_empty(&q->receivers_waiting))
-        {
-            TCB_t *woken = task_queue_pop_task(&q->receivers_waiting);
-            woken->current_wait_queue = NULL;
-            woken->state = TASK_STATE_READY;
 
-            if(woken->priority<current_task->priority){
-                yield_requested=true;
-            }
-        }
-    }
-    
+    /*
+        Whoever woke us (kernel_queue_receive()'s fast path) already
+        copied our item into the buffer for us -- nothing left to do here.
+    */
     port_critical_exit();
 
-    if(yield_requested)
-    {
-        port_trigger_context_switch();
-    }
-
-    return status;
+    return QUEUE_PASSED;
 }
  
 /* 
@@ -329,78 +325,73 @@ queue_status_t kernel_queue_receive(kernel_queue_t *q, void *item, uint32_t time
     {
         /* Fast path: data available, no blocking needed. */
         status=kernel_queue_pop(q, item);
- 
+
+        /*
+            A slot just freed up. If a sender is already blocked waiting
+            for exactly this slot, refill the buffer from their pending
+            item right now, in this same critical section -- otherwise a
+            third task's fast-path send() could steal the freed slot
+            before the waiting sender gets to run.
+        */
         if (!task_queue_empty(&q->senders_waiting))
         {
             TCB_t *woken = task_queue_pop_task(&q->senders_waiting);
+            (void)kernel_queue_push(q, woken->pending_item);
             woken->current_wait_queue = NULL;
             woken->state = TASK_STATE_READY;
 
-            if(woken->priority<current_task->priority){
+            if(woken->priority < current_task->priority){
                 yield_requested=true;
             }
         }
 
         port_critical_exit();
 
-        if(yield_requested){
+        if(yield_requested)
+        {
             port_trigger_context_switch();
         }
- 
+
         return status;
     }
- 
+
     if (timeout_ticks == 0U)
     {
         /* Queue empty and caller doesn't want to wait. */
         port_critical_exit();
         return QUEUE_FAILED;
     }
- 
+
     /* Queue is empty: block the calling task until data arrives or timeout expires.
        wakeup_tick now holds an ABSOLUTE deadline tick, not a countdown. */
     current_task->timed_out = 0U;
     current_task->wakeup_tick = kernel_get_tick_count() + timeout_ticks;
     current_task->current_wait_queue = &q->receivers_waiting;
+    current_task->pending_item = item;   /* our destination buffer, for whoever wakes us */
     current_task->state = TASK_STATE_BLOCKED;
     task_queue_push_task(&q->receivers_waiting, current_task);
- 
+
     port_critical_exit();
- 
+
     /* Give up the CPU; we resume here once woken (by a sender) or timed out. */
     port_trigger_context_switch();
- 
+
     port_critical_enter();
- 
+
+    current_task->pending_item = NULL;
+
     if (current_task->timed_out)
     {
         port_critical_exit();
         return QUEUE_TIMED_OUT;
     }
- 
-    /* Woken because a sender put something in for us; we were already
-       unlinked from receivers_waiting by whoever woke us. */
-    status = kernel_queue_pop(q, item);
-    if(status==QUEUE_PASSED)
-    {
-        if (!task_queue_empty(&q->senders_waiting))
-        {
-            TCB_t *woken = task_queue_pop_task(&q->senders_waiting);
-            woken->current_wait_queue = NULL;
-            woken->state = TASK_STATE_READY;
-            if (woken->priority < current_task->priority)
-            {
-                yield_requested=true;
-            }
-        }
-    }
 
+    /*
+        Whoever woke us (kernel_queue_send()'s direct hand-off) already
+        copied the item into *item for us -- nothing left to do here.
+    */
     port_critical_exit();
-
-    if(yield_requested){
-        port_trigger_context_switch();
-    }
-    return status;
+    return QUEUE_PASSED;
 }
 
 queue_status_t kernel_queue_send_from_isr(kernel_queue_t *q, const void *item)
@@ -410,6 +401,26 @@ queue_status_t kernel_queue_send_from_isr(kernel_queue_t *q, const void *item)
         return QUEUE_FAILED;
     }
 
+    bool yield_requested=false;
+
+    /* Direct hand-off, same reasoning as the task-context fast path. */
+    if (!task_queue_empty(&q->receivers_waiting))
+    {
+        TCB_t *woken = task_queue_pop_task(&q->receivers_waiting);
+
+        memcpy(woken->pending_item, item, q->item_size);
+        woken->current_wait_queue = NULL;
+        woken->state = TASK_STATE_READY;
+
+        if ((current_task != NULL) && (woken->priority < current_task->priority))
+        {
+            yield_requested=true;
+        }
+
+        kernel_yield_from_isr(yield_requested);
+        return QUEUE_PASSED;
+    }
+
     /* ISR-safe API: Never block. If the queue is full, return immediately */
     if (q->count >= q->capacity)
     {
@@ -417,23 +428,6 @@ queue_status_t kernel_queue_send_from_isr(kernel_queue_t *q, const void *item)
     }
 
     (void)kernel_queue_push(q, item);
-
-    /* Wake one receiver waiting for data */
-    bool yield_requested=false;
-    if (!task_queue_empty(&q->receivers_waiting))
-    {
-        TCB_t *woken = task_queue_pop_task(&q->receivers_waiting);
-
-        woken->current_wait_queue = NULL;
-        woken->state = TASK_STATE_READY;
-
-        /* Request a context switch if the awakened task has a higher priority */
-        if ((current_task != NULL) && (woken->priority < current_task->priority))
-        {
-            yield_requested=true;
-        }
-    }
-    kernel_yield_from_isr(yield_requested);
 
     return QUEUE_PASSED;
 }
@@ -453,12 +447,14 @@ queue_status_t kernel_queue_receive_from_isr(kernel_queue_t *q, void *item)
 
     (void)kernel_queue_pop(q, item);
 
-    /* Wake one sender waiting for free space */
+    /* A slot just freed -- refill it from a waiting sender's pending item
+       right now, same reasoning as the task-context fast path. */
     bool yield_requested=false;
     if (!task_queue_empty(&q->senders_waiting))
     {
         TCB_t *woken = task_queue_pop_task(&q->senders_waiting);
 
+        (void)kernel_queue_push(q, woken->pending_item);
         woken->current_wait_queue = NULL;
         woken->state = TASK_STATE_READY;
 

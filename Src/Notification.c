@@ -80,17 +80,14 @@ notification_status_t kernel_notification_wait( kernel_notification_t *notificat
 
     current_task->state = TASK_STATE_BLOCKED;
 
-    task_queue_push_task(
-        &notification->waiters,
-        current_task
-    );
+    task_queue_push_task(&notification->waiters, current_task);
 
     port_critical_exit();
 
     /*
      * Give the CPU to another task.
      */
-    kernel_yield();
+    port_trigger_context_switch();
 
     /*
      * We have been scheduled again.
@@ -106,7 +103,7 @@ notification_status_t kernel_notification_wait( kernel_notification_t *notificat
 
 
 //======================================================================================================================================
-//this will do the actual notifying and waking-up job
+//This will do the actual notifying and waking-up job
 notification_status_t kernel_notification_notify(kernel_notification_t *notification){
 
     if (notification == NULL)
@@ -116,14 +113,9 @@ notification_status_t kernel_notification_notify(kernel_notification_t *notifica
 
     port_critical_enter();
 
-    /*
-        If a task is waiting, wake one waiting task.
-    */
+    /* If a task is waiting, wake one waiting task */
     bool yield_requested=false;
-
-
-    
-    // If a task is waiting, wake one waiting task.
+   
     if (!task_queue_empty(&notification->waiters)) //task_queue_empty is a bool type , so should return 1/0
     {                                              // 1- queue is empty
                                                    // 0- queue is not empty (in this case this block will execute and pop one task from the queue and wake it)
@@ -141,8 +133,9 @@ notification_status_t kernel_notification_notify(kernel_notification_t *notifica
         woken->current_wait_queue = NULL; // removing the current task from waiting queue
         woken->timed_out = 0U;            //task has just unblocked ,, so ticks have been reset
         woken->state = TASK_STATE_READY; // task unblocked
-
-        yield_requested=true;
+        if(current_task->priority > woken->priority){
+            yield_requested=true;
+        }
     }
     else //no task is waiting , since waiter is NULL 
         //in this case we should save the notification for future API'S to consume the notification 
@@ -160,10 +153,8 @@ notification_status_t kernel_notification_notify(kernel_notification_t *notifica
         kernel_yield();
     }
 
-    
-
     return NOTIFICATION_SUCCESS;
-    }
+}
 
 
 
@@ -175,12 +166,14 @@ notification_status_t kernel_notification_notify(kernel_notification_t *notifica
         return NOTIFICATION_ERROR;
     }
 
-    if (notification->pending){
+    if (notification->pending)
+    {
         notification->pending = false; // consume the notification and change its status
         return NOTIFICATION_SUCCESS;
     }
-    else{                              // no task should be kept in blocked state to wait for the notification
-        return NOTIFICATION_EMPTY;
+    else
+    {                              
+        return NOTIFICATION_EMPTY; // Interrupts cannot block to wait for a notification
     }
 
     }
@@ -205,7 +198,7 @@ notification_status_t kernel_notification_notify(kernel_notification_t *notifica
         woken->current_wait_queue = NULL;
         woken->state = TASK_STATE_READY;
 
-        if ((current_task != NULL) && (woken->priority < current_task->priority)){ //means woken task is having more priority , lesser no means more priority , then it needs to be scheduled
+        if ((current_task != NULL) && (woken->priority < current_task->priority)){ //means woken task is having more priority , lesser means more priority , then it needs to be scheduled
             yield_requested = true; 
         }
     }
@@ -217,7 +210,7 @@ notification_status_t kernel_notification_notify(kernel_notification_t *notifica
     kernel_yield_from_isr(yield_requested);
 
     return NOTIFICATION_SUCCESS;
-    }
+}
 
     //=============================================================================================================================================================================
 
