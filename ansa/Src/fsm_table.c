@@ -1,0 +1,167 @@
+#include <stddef.h>
+#include "fsm_internal.h"
+
+#define SUB_ANY 0xFFU
+
+static const fsm_transition_t table[] = {
+    /* Boot */
+    { FSM_STATE_BOOT, SUB_ANY, EVT_INTERNAL_TICK,
+      guard_system_ready, FSM_STATE_IDLE, 0U, FSM_REASON_GUARD },
+
+    /* Arm / takeoff */
+    { FSM_STATE_IDLE, SUB_ANY, EVT_ARM_REQUEST,
+      guard_can_arm, FSM_STATE_ARMING, 0U, FSM_REASON_COMMAND },
+
+    { FSM_STATE_ARMING, SUB_ANY, EVT_INTERNAL_TICK,
+      guard_motors_confirmed, FSM_STATE_ARMED, 0U, FSM_REASON_GUARD },
+
+    { FSM_STATE_ARMED, SUB_ANY, EVT_TAKEOFF_REQUEST,
+      guard_can_takeoff, FSM_STATE_TAKEOFF, 0U, FSM_REASON_COMMAND },
+
+    { FSM_STATE_TAKEOFF, SUB_ANY, EVT_INTERNAL_TICK,
+      guard_takeoff_complete, FSM_STATE_HOVER, 0U, FSM_REASON_TAKEOFF_COMPLETE },
+
+    /* Mission */
+    { FSM_STATE_HOVER, SUB_ANY, EVT_MISSION_START,
+      guard_mission_loaded, FSM_STATE_MISSION, FSM_MISSION_WAYPOINT_NAV, FSM_REASON_COMMAND },
+
+    { FSM_STATE_MISSION, FSM_MISSION_WAYPOINT_NAV, EVT_WAYPOINT_REACHED,
+      guard_has_next_waypoint, FSM_STATE_MISSION, FSM_MISSION_WAYPOINT_NAV, FSM_REASON_WAYPOINT_REACHED },
+
+    { FSM_STATE_MISSION, FSM_MISSION_WAYPOINT_NAV, EVT_WAYPOINT_REACHED,
+      guard_no_next_waypoint, FSM_STATE_HOVER, 0U, FSM_REASON_MISSION_COMPLETE },
+
+    { FSM_STATE_MISSION, FSM_MISSION_WAYPOINT_NAV, EVT_INTERNAL_TICK,
+      guard_waypoint_reached, FSM_STATE_MISSION, FSM_MISSION_WAYPOINT_NAV, FSM_REASON_WAYPOINT_REACHED },
+
+    { FSM_STATE_MISSION, FSM_MISSION_LOITER, EVT_INTERNAL_TICK,
+      guard_loiter_complete, FSM_STATE_MISSION, FSM_MISSION_WAYPOINT_NAV, FSM_REASON_WAYPOINT_REACHED },
+
+    { FSM_STATE_MISSION, FSM_MISSION_WAYPOINT_NAV, EVT_MISSION_PAUSE,
+      guard_true, FSM_STATE_MISSION, FSM_MISSION_PAUSED, FSM_REASON_COMMAND },
+
+    { FSM_STATE_MISSION, FSM_MISSION_LOITER, EVT_MISSION_PAUSE,
+      guard_true, FSM_STATE_MISSION, FSM_MISSION_PAUSED, FSM_REASON_COMMAND },
+
+    { FSM_STATE_MISSION, FSM_MISSION_PAUSED, EVT_MISSION_RESUME,
+      guard_true, FSM_STATE_MISSION, FSM_MISSION_WAYPOINT_NAV, FSM_REASON_COMMAND },
+
+    /* Manual / safety mission exits */
+    { FSM_STATE_HOVER, SUB_ANY, EVT_RTL_REQUEST,
+      guard_true, FSM_STATE_RTL, FSM_RTL_CLIMB, FSM_REASON_COMMAND },
+
+    { FSM_STATE_HOVER, SUB_ANY, EVT_LAND_REQUEST,
+      guard_true, FSM_STATE_LAND, 0U, FSM_REASON_COMMAND },
+
+    { FSM_STATE_MISSION, SUB_ANY, EVT_RTL_REQUEST,
+      guard_true, FSM_STATE_RTL, FSM_RTL_CLIMB, FSM_REASON_COMMAND },
+
+    { FSM_STATE_MISSION, SUB_ANY, EVT_LAND_REQUEST,
+      guard_true, FSM_STATE_LAND, 0U, FSM_REASON_COMMAND },
+
+    { FSM_STATE_MISSION, SUB_ANY, EVT_MISSION_ABORT,
+      guard_true, FSM_STATE_RTL, FSM_RTL_CLIMB, FSM_REASON_COMMAND },
+
+    /* RTL hierarchy */
+    { FSM_STATE_RTL, FSM_RTL_CLIMB, EVT_INTERNAL_TICK,
+      guard_rtl_altitude_reached, FSM_STATE_RTL, FSM_RTL_TRANSIT, FSM_REASON_GUARD },
+
+    { FSM_STATE_RTL, FSM_RTL_TRANSIT, EVT_INTERNAL_TICK,
+      guard_home_reached, FSM_STATE_RTL, FSM_RTL_DESCEND, FSM_REASON_GUARD },
+
+    { FSM_STATE_RTL, FSM_RTL_DESCEND, EVT_INTERNAL_TICK,
+      guard_land_altitude_reached, FSM_STATE_LAND, 0U, FSM_REASON_GUARD },
+
+    /* Land */
+    { FSM_STATE_LAND, SUB_ANY, EVT_INTERNAL_TICK,
+      guard_touchdown, FSM_STATE_IDLE, 0U, FSM_REASON_TOUCHDOWN },
+
+    /* Global safety events */
+    { FSM_STATE_BOOT, SUB_ANY, EVT_SENSOR_FAULT,
+      guard_true, FSM_STATE_EMERGENCY, 0U, FSM_REASON_SENSOR_FAULT },
+    { FSM_STATE_IDLE, SUB_ANY, EVT_SENSOR_FAULT,
+      guard_true, FSM_STATE_EMERGENCY, 0U, FSM_REASON_SENSOR_FAULT },
+    { FSM_STATE_ARMING, SUB_ANY, EVT_SENSOR_FAULT,
+      guard_true, FSM_STATE_EMERGENCY, 0U, FSM_REASON_SENSOR_FAULT },
+    { FSM_STATE_ARMED, SUB_ANY, EVT_SENSOR_FAULT,
+      guard_true, FSM_STATE_EMERGENCY, 0U, FSM_REASON_SENSOR_FAULT },
+    { FSM_STATE_TAKEOFF, SUB_ANY, EVT_SENSOR_FAULT,
+      guard_true, FSM_STATE_EMERGENCY, 0U, FSM_REASON_SENSOR_FAULT },
+    { FSM_STATE_HOVER, SUB_ANY, EVT_SENSOR_FAULT,
+      guard_true, FSM_STATE_EMERGENCY, 0U, FSM_REASON_SENSOR_FAULT },
+    { FSM_STATE_MISSION, SUB_ANY, EVT_SENSOR_FAULT,
+      guard_true, FSM_STATE_EMERGENCY, 0U, FSM_REASON_SENSOR_FAULT },
+    { FSM_STATE_RTL, SUB_ANY, EVT_SENSOR_FAULT,
+      guard_true, FSM_STATE_EMERGENCY, 0U, FSM_REASON_SENSOR_FAULT },
+
+    { FSM_STATE_BOOT, SUB_ANY, EVT_WATCHDOG_TIMEOUT,
+      guard_true, FSM_STATE_EMERGENCY, 0U, FSM_REASON_WATCHDOG },
+    { FSM_STATE_IDLE, SUB_ANY, EVT_WATCHDOG_TIMEOUT,
+      guard_true, FSM_STATE_EMERGENCY, 0U, FSM_REASON_WATCHDOG },
+    { FSM_STATE_ARMING, SUB_ANY, EVT_WATCHDOG_TIMEOUT,
+      guard_true, FSM_STATE_EMERGENCY, 0U, FSM_REASON_WATCHDOG },
+    { FSM_STATE_ARMED, SUB_ANY, EVT_WATCHDOG_TIMEOUT,
+      guard_true, FSM_STATE_EMERGENCY, 0U, FSM_REASON_WATCHDOG },
+    { FSM_STATE_TAKEOFF, SUB_ANY, EVT_WATCHDOG_TIMEOUT,
+      guard_true, FSM_STATE_EMERGENCY, 0U, FSM_REASON_WATCHDOG },
+    { FSM_STATE_HOVER, SUB_ANY, EVT_WATCHDOG_TIMEOUT,
+      guard_true, FSM_STATE_EMERGENCY, 0U, FSM_REASON_WATCHDOG },
+    { FSM_STATE_MISSION, SUB_ANY, EVT_WATCHDOG_TIMEOUT,
+      guard_true, FSM_STATE_EMERGENCY, 0U, FSM_REASON_WATCHDOG },
+    { FSM_STATE_RTL, SUB_ANY, EVT_WATCHDOG_TIMEOUT,
+      guard_true, FSM_STATE_EMERGENCY, 0U, FSM_REASON_WATCHDOG },
+
+    { FSM_STATE_MISSION, SUB_ANY, EVT_BATTERY_CRITICAL,
+      guard_true, FSM_STATE_RTL, FSM_RTL_CLIMB, FSM_REASON_BATTERY_CRITICAL },
+    { FSM_STATE_HOVER, SUB_ANY, EVT_BATTERY_CRITICAL,
+      guard_true, FSM_STATE_RTL, FSM_RTL_CLIMB, FSM_REASON_BATTERY_CRITICAL },
+    { FSM_STATE_TAKEOFF, SUB_ANY, EVT_BATTERY_CRITICAL,
+      guard_true, FSM_STATE_RTL, FSM_RTL_CLIMB, FSM_REASON_BATTERY_CRITICAL },
+
+    { FSM_STATE_MISSION, SUB_ANY, EVT_GEOFENCE_BREACH,
+      guard_true, FSM_STATE_RTL, FSM_RTL_CLIMB, FSM_REASON_GEOFENCE },
+    { FSM_STATE_HOVER, SUB_ANY, EVT_GEOFENCE_BREACH,
+      guard_true, FSM_STATE_RTL, FSM_RTL_CLIMB, FSM_REASON_GEOFENCE },
+
+    { FSM_STATE_MISSION, SUB_ANY, EVT_LINK_LOST,
+      guard_link_lost_sustained, FSM_STATE_FAILSAFE, 0U, FSM_REASON_LINK_LOST },
+    { FSM_STATE_HOVER, SUB_ANY, EVT_LINK_LOST,
+      guard_link_lost_sustained, FSM_STATE_FAILSAFE, 0U, FSM_REASON_LINK_LOST },
+    { FSM_STATE_TAKEOFF, SUB_ANY, EVT_LINK_LOST,
+      guard_link_lost_sustained, FSM_STATE_FAILSAFE, 0U, FSM_REASON_LINK_LOST },
+    { FSM_STATE_RTL, SUB_ANY, EVT_LINK_LOST,
+      guard_link_lost_sustained, FSM_STATE_FAILSAFE, 0U, FSM_REASON_LINK_LOST }
+};
+
+bool fsm_table_lookup(
+    fsm_state_t state,
+    uint8_t substate,
+    fsm_event_type_t event,
+    fsm_state_t *to_state,
+    uint8_t *to_substate,
+    fsm_transition_reason_t *reason)
+{
+    const unsigned n = (unsigned)(sizeof(table) / sizeof(table[0]));
+
+    for (unsigned i = 0U; i < n; ++i) {
+        const fsm_transition_t *t = &table[i];
+
+        if (t->from_state != state ||
+            t->event != event)
+            continue;
+
+        if (t->from_substate != SUB_ANY &&
+            t->from_substate != substate)
+            continue;
+
+        if (t->guard != NULL && !t->guard())
+            continue;
+
+        *to_state = t->to_state;
+        *to_substate = t->to_substate;
+        *reason = t->reason;
+        return true;
+    }
+
+    return false;
+}
