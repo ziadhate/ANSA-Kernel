@@ -21,5 +21,5 @@
 #include "Notification.h"  /* Task notification mechanisms */
 #include "mailbox.h"       /* Mailbox IPC mechanisms */
 #include "watchdog.h"      /* Watchdog management and supervision */
-
+#include "watchdog_port.h"
 #endif /* KERNEL_H */

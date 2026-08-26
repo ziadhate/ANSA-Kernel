@@ -1,4 +1,5 @@
 #include "../Inc/watchdog.h"
+#include "../Inc/watchdog_port.h"
 #include "../Inc/scheduler.h"
 #include "../Port/Cortex_M4/Inc/port.h"
 #include <stddef.h>
