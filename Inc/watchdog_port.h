@@ -6,18 +6,20 @@
 //STM32L4 addresses i took from its memory map
 //STM32L4 IWDG
 //Base address: 0x40003000
+#ifndef IWDG_BASE
 #define IWDG_BASE       (0x40003000UL)
+#endif
+
 #define IWDG_KR         (*(volatile uint32_t *)(IWDG_BASE + 0x00UL))
 #define IWDG_PR         (*(volatile uint32_t *)(IWDG_BASE + 0x04UL))
 #define IWDG_RLR        (*(volatile uint32_t *)(IWDG_BASE + 0x08UL))
 #define IWDG_SR         (*(volatile uint32_t *)(IWDG_BASE + 0x0CUL))
 
+
 // IWDG key values.
 #define IWDG_KEY_ENABLE     0xCCCCUL
 #define IWDG_KEY_RELOAD     0xAAAAUL
 #define IWDG_KEY_UNLOCK     0x5555UL
-
-extern volatile uint32_t watchdog_debug_status;
 
 //LSI is approximately 32 kHz.
 //PR = 3 -> division by 32
