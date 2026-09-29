@@ -1,0 +1,27 @@
+var searchData=
+[
+  ['safe_20apis_0',['ISR-Safe APIs',['../md_Docs_2architecture_2ISR__RULES.html#autotoc_md28',1,'']]],
+  ['scb_5fshpr3_1',['SCB_SHPR3',['../port_8h.html#ac0a168427d861c6175c07a2da89bca40',1,'port.h']]],
+  ['scheduler_2',['Scheduler',['../md_Docs_2architecture_2ARCHITECTURE.html#autotoc_md18',1,'']]],
+  ['scheduler_2eh_3',['scheduler.h',['../scheduler_8h.html',1,'']]],
+  ['scheduler_5fselect_5fnext_5ftask_4',['scheduler_select_next_task',['../scheduler_8h.html#acf4c2a45e576597fa499d80a53a86278',1,'scheduler.h']]],
+  ['scheduling_20from_20isr_5',['Scheduling From ISR',['../md_Docs_2architecture_2ISR__RULES.html#autotoc_md29',1,'']]],
+  ['sections_6',['Critical Sections',['../md_Docs_2architecture_2ISR__RULES.html#autotoc_md30',1,'']]],
+  ['semaphore_2eh_7',['semaphore.h',['../semaphore_8h.html',1,'']]],
+  ['senders_5fwaiting_8',['senders_waiting',['../structkernel__queue__t.html#a518ff185ce1f0936293e99b90c022c8a',1,'kernel_queue_t']]],
+  ['service_20routine_20isr_20rules_20guidelines_9',['1. Interrupt Service Routine (ISR) Rules &amp; Guidelines',['../md_Docs_2API__REFERENCE.html#autotoc_md9',1,'']]],
+  ['source_10',['source',['../md_Docs_2README.html#autotoc_md38',1,'Authoritative Source'],['../md_Docs_2api_2API__REFERENCE.html#autotoc_md6',1,'Authoritative Source'],['../md_Docs_2release_2RELEASE__CHECKLIST.html#autotoc_md40',1,'Source']]],
+  ['sp_11',['sp',['../structTCB__t.html#acdca9ce428cab4beaec540558585b5fc',1,'TCB_t']]],
+  ['stack_5fbase_12',['stack_base',['../structTCB__t.html#a9e023e30797d42a46e4b6187eed7239a',1,'TCB_t']]],
+  ['stack_5fwords_13',['stack_words',['../structTCB__t.html#a7d47f3c060d433801d4b0d95c290772b',1,'TCB_t']]],
+  ['state_14',['state',['../structTCB__t.html#a1eb0404b7fc7dc414d25cb0222cd141d',1,'TCB_t']]],
+  ['status_15',['Documentation Status',['../md_Docs_2README.html#autotoc_md37',1,'']]],
+  ['structure_16',['Documentation Structure',['../md_Docs_2README.html#autotoc_md36',1,'']]],
+  ['synchronization_17',['Synchronization',['../md_Docs_2architecture_2ARCHITECTURE.html#autotoc_md20',1,'']]],
+  ['synchronization_20apis_18',['Synchronization APIs',['../md_Docs_2api_2API__REFERENCE.html#autotoc_md4',1,'']]],
+  ['systick_5fbase_19',['SysTick_BASE',['../port_8h.html#a58effaac0b93006b756d33209e814646',1,'port.h']]],
+  ['systick_5fctrl_20',['SysTick_CTRL',['../port_8h.html#a5eb346987caed9e82410a9e58d661527',1,'port.h']]],
+  ['systick_5fhandler_21',['SysTick_Handler',['../port_8h.html#ab5e09814056d617c521549e542639b7e',1,'port.h']]],
+  ['systick_5fload_22',['SysTick_LOAD',['../port_8h.html#a346fec6ec11b97183c8f1a9e4f27165a',1,'port.h']]],
+  ['systick_5fval_23',['SysTick_VAL',['../port_8h.html#abb0f581e98f2f21e5fcdc8561763c95d',1,'port.h']]]
+];

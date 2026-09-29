@@ -1,10 +1,10 @@
-# Build artifacts
+build/
+vscode_example/Debug/
 *.o
 *.elf
+*.hex
 *.bin
 *.map
-*.hex
-
-# Build directories
-build/
-obj/
+*.d
+__pycache__/
+.vscode/

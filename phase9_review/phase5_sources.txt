@@ -1,0 +1,2166 @@
+#ifndef MUTEX_H
+#define MUTEX_H
+
+#include <stdint.h> 
+#include <stdbool.h>
+
+#include <task.h>
+#include <queue.h>
+
+/*  Kernel mutex.
+    A mutex provides exclusive access to a shared resource. Only one task can own the mutex at a time.
+*/
+typedef struct kernel_mutex_t
+{
+    bool locked;         // Indicates whether the mutex is currently locked
+
+    /* Task currently owning the mutex. NULL when the mutex is not owned */
+    TCB_t *owner;
+
+    /* Queue of tasks blocked while waiting to acquire the mutex */
+    task_queue_t waiting_tasks;
+
+    /* Links this mutex to the next mutex owned by the same task.
+        Used to maintain the list of mutexes currently owned by the task stored in 'owner'.
+    */
+    struct kernel_mutex_t *next_owned;
+
+} kernel_mutex_t;
+
+
+/* Result codes returned by mutex operations */
+typedef enum
+{
+    MUTEX_SUCCESS = 0,       // Operation completed successfully
+    MUTEX_ERROR,             // Invalid argument or internal error
+    MUTEX_BUSY,              // Mutex is already owned
+    MUTEX_TIMEOUT            // Mutex could not be acquired before timeout
+
+} mutex_status_t;
+
+
+/*
+    Initializes a mutex.
+    The mutex starts in the unlocked state with no owner and an empty waiting queue.
+*/
+mutex_status_t kernel_mutex_init(kernel_mutex_t *mutex);
+
+/*  Acquires the mutex.
+    If the mutex is available, the current task becomes its owner.
+    If the mutex is already owned, the current task may be blocked until the mutex becomes available.
+*/
+mutex_status_t kernel_mutex_lock(kernel_mutex_t *mutex);
+
+/*
+    Releases the mutex.
+    The current task must be the owner of the mutex.
+    If other tasks are waiting, one of them may be unblocked and become the new owner.
+*/
+mutex_status_t kernel_mutex_unlock(kernel_mutex_t *mutex);
+
+/*
+    Attempts to acquire the mutex without blocking.
+    Returns MUTEX_SUCCESS if the mutex was acquired.
+    Returns MUTEX_BUSY immediately if another task already owns it.
+*/
+mutex_status_t kernel_mutex_try_lock(kernel_mutex_t *mutex);
+
+#endif
+    #include "../Inc/mutex.h"
+    #include "../Inc/scheduler.h"
+    #include "../Port/Cortex_M4/Inc/port.h"
+    #include <stddef.h>
+
+
+    /*
+    * Initialize a mutex.
+    */
+    mutex_status_t kernel_mutex_init(kernel_mutex_t *mutex)
+    {
+        /* Check for invalid mutex pointer */
+        if (mutex == NULL)
+        {
+            return MUTEX_ERROR;
+        }
+
+        /* Enter critical section */
+        port_critical_enter();
+        
+
+        /* Mutex is initially unlocked */
+        mutex->locked = false;
+
+        /* No task owns the mutex initially */
+        mutex->owner = NULL;
+
+        /* Initialize waiting task queue */
+        mutex->waiting_tasks.head = NULL;
+        mutex->waiting_tasks.tail = NULL;
+
+        /* No linked mutex initially */
+        mutex->next_owned = NULL;
+
+        /* Exit critical section */
+       
+        port_critical_exit();
+
+        return MUTEX_SUCCESS;
+    }
+
+
+    /*
+    * Lock a mutex.
+    *
+    * If the mutex is free:
+    *      Current task becomes the owner.
+    *
+    * If the mutex is already locked:
+    *      Current task is added to the waiting queue.
+    *      Priority inheritance is applied.
+    *      Current task is blocked.
+    */
+    mutex_status_t kernel_mutex_lock(kernel_mutex_t *mutex)
+    {
+        /* Check for invalid mutex pointer */
+        if (mutex == NULL)
+        {
+            return MUTEX_ERROR;
+        }
+
+        /* A valid current task is required */
+        if (current_task == NULL)
+        {
+            return MUTEX_ERROR;
+        }
+
+        /* Enter critical section */
+        port_critical_enter();
+       
+
+        /* Case 1: Mutex is free */
+        if (mutex->locked == false)
+        {
+            /* Lock the mutex and assign ownership to the current task */
+            mutex->locked = true;
+            mutex->owner = current_task;
+
+            /* Add the mutex to the owner's list of held mutexes */
+            mutex->next_owned = current_task->owned_mutexes;
+
+            /* Update the head of the owned-mutex list */
+            current_task->owned_mutexes = mutex;
+
+            /* Current task is not blocked */
+            current_task->blocked_on = NULL;
+
+            /* Exit critical section */
+            port_critical_exit();
+
+            return MUTEX_SUCCESS;
+        }
+
+        /* Case 2: Mutex is already locked */
+
+        /* Prevent recursive locking */
+        if (mutex->owner == current_task)
+        {
+            port_critical_exit();
+
+            return MUTEX_ERROR;
+        }
+
+        /*
+        * Priority Inheritance
+        *
+        * Lower number = higher priority.
+        *
+        * If the waiting task has a higher priority
+        * than the mutex owner, temporarily raise
+        * the owner's priority.
+        */
+        if (current_task->priority < mutex->owner->priority)
+        {
+            mutex->owner->priority = current_task->priority;
+        }
+
+        /* Remember which mutex is blocking the current task */
+        current_task->blocked_on = mutex;
+
+        /* Add current task to waiting queue */
+        task_queue_push_task(&mutex->waiting_tasks, current_task);
+
+        /* Block the current task */
+        current_task->state = TASK_STATE_BLOCKED;
+
+        /* Exit critical section */
+        port_critical_exit();
+
+        /* Give CPU to another task */
+        port_trigger_context_switch();
+
+        return MUTEX_SUCCESS;
+    }
+
+
+    /*
+    * Unlock a mutex.
+    *
+    * If no task is waiting: Mutex becomes completely unlocked.
+    * If tasks are waiting: Mutex ownership is transferred to the highest-priority waiting task
+    */
+    mutex_status_t kernel_mutex_unlock(kernel_mutex_t *mutex)
+    {
+        /* Check for invalid mutex pointer */
+        if (mutex == NULL)
+        {
+            return MUTEX_ERROR;
+        }
+
+        /* A valid current task is required */
+        if (current_task == NULL)
+        {
+            return MUTEX_ERROR;
+        }
+
+        /* Enter critical section */
+        port_critical_enter();
+      
+
+        /* Check whether current task owns the mutex */
+        if (mutex->owner != current_task)
+        {
+            /* Only the owner can unlock the mutex */
+            port_critical_exit();
+
+            return MUTEX_ERROR;
+        }
+
+        bool yield_requested=false;
+        /* Case 1: No task is waiting for the mutex */
+        if (task_queue_empty(&mutex->waiting_tasks))
+        {
+            /* Remove mutex from owner's mutex list */
+            if (current_task->owned_mutexes == mutex)
+            {
+                current_task->owned_mutexes = mutex->next_owned;
+            }
+
+            mutex->next_owned = NULL;
+
+            /* Restore original priority */
+            current_task->priority = current_task->base_priority;
+
+            /* Completely unlock the mutex */
+            mutex->locked = false;
+            mutex->owner = NULL;
+        }
+
+        /* Case 2: At least one task is waiting */
+        else
+        {
+            /*
+            * Get the next waiting task.
+            *
+            * task_queue_pop_task() selects the appropriate waiting task according to the queue implementation
+            */
+            TCB_t *next_owner = task_queue_pop_task(&mutex->waiting_tasks);
+
+            /* Make sure a valid task was obtained */
+            if (next_owner == NULL)
+            {
+                port_critical_exit();
+
+                return MUTEX_ERROR;
+            }
+
+            /* Remove mutex from old owner's list */
+            if (current_task->owned_mutexes == mutex)
+            {
+                current_task->owned_mutexes = mutex->next_owned;
+            }
+
+            mutex->next_owned = NULL;
+
+            /* Restore old owner's original priority */
+            current_task->priority = current_task->base_priority;
+
+            /* Transfer mutex ownership */
+            mutex->locked = true;
+            mutex->owner = next_owner;
+
+            /* Add mutex to new owner's list */
+            /* Save the current head of the list of mutexes currently owned by the task,
+            so it isn't lost when we overwrite it below */
+            mutex->next_owned = next_owner->owned_mutexes;
+
+            /* Make this mutex the first mutex in the task's owned-mutex list, 
+            a kind of update of the head of the owned-mutex list */
+            next_owner->owned_mutexes = mutex;
+
+            /* Wake the new owner */
+            next_owner->state = TASK_STATE_READY;
+            next_owner->blocked_on = NULL;
+            next_owner->current_wait_queue = NULL;
+
+            if(next_owner->priority < current_task->priority){
+                yield_requested=true;
+            }
+        }
+
+        /* Exit critical section */
+        port_critical_exit();
+
+        /* Ask scheduler whether another task should execute */
+        if(yield_requested){
+            port_trigger_context_switch();
+        }
+
+        return MUTEX_SUCCESS;
+    }
+
+
+    /*
+    * Try to lock a mutex.
+    *
+    * Unlike kernel_mutex_lock(), this function
+    * never blocks the current task.
+    *
+    * Returns:
+    *      MUTEX_SUCCESS -> mutex acquired
+    *      MUTEX_BUSY    -> mutex already locked
+    *      MUTEX_ERROR   -> invalid argument
+    */
+    mutex_status_t kernel_mutex_try_lock(kernel_mutex_t *mutex)
+    {
+        /* Check for invalid mutex pointer */
+        if (mutex == NULL)
+        {
+            return MUTEX_ERROR;
+        }
+
+        /* A valid current task is required */
+        if (current_task == NULL)
+        {
+            return MUTEX_ERROR;
+        }
+
+        /* Enter critical section */
+        port_critical_enter();
+        
+
+        /* Check whether mutex is already locked */
+        if (mutex->locked == true)
+        {
+            if (mutex->owner == current_task)
+            {
+                port_critical_exit();
+
+                return MUTEX_ERROR;
+            }
+
+            port_critical_exit();
+
+            return MUTEX_BUSY;
+        }
+
+        /* Mutex is free. Give ownership to current task */
+        mutex->locked = true;
+        mutex->owner = current_task;
+
+        /* Add mutex to owner's mutex list */
+        /* Save the current head of the list of mutexes currently owned by the task,
+        so it isn't lost when we overwrite it below */
+        mutex->next_owned = current_task->owned_mutexes;
+
+        /* Make this mutex the first mutex in the task's owned-mutex list, 
+        a kind of update of the head of the owned-mutex list */
+        current_task->owned_mutexes = mutex;
+
+        current_task->blocked_on = NULL;
+
+        /* Exit critical section */
+        port_critical_exit();
+
+        return MUTEX_SUCCESS;
+    }#ifndef SEMAPHORE_H
+#define SEMAPHORE_H
+#include <stdint.h>
+#include "queue.h"
+
+/* Kernel semaphore
+  A semaphore contains a counter representing the number of available tokens 
+  and a queue containing tasks waiting for a token
+*/
+typedef struct
+{
+    uint32_t count;           // Current number of available tokens
+    uint32_t max_count;       // Maximum number of tokens allowed
+
+    task_queue_t waiters; /* Queue of tasks currently blocked while waiting for a semaphore token */
+} kernel_sem_t;
+
+/*
+  Initializes a semaphore.
+  initial_count : Initial number of available tokens
+  max_count : Maximum number of tokens the semaphore can contain
+  
+  The initial count must not exceed max_count.
+*/
+queue_status_t kernel_sem_init(kernel_sem_t *sem, uint32_t initial_count, uint32_t max_count);
+
+/*
+  Attempts to acquire one semaphore token
+  If a token is available, the task takes it immediately.
+  Otherwise, the task is blocked until a token becomes available or the specified timeout expires.
+
+  timeout_ticks : Maximum number of ticks to wait
+*/
+queue_status_t kernel_sem_take(kernel_sem_t *sem, uint32_t timeout_ticks);
+
+/*
+  Releases one semaphore token
+  If tasks are waiting for the semaphore, one waiting task may be unblocked instead of increasing the token count.
+*/
+queue_status_t kernel_sem_give(kernel_sem_t *sem);
+
+/* Returns the current number of available semaphore tokens. Does not modify the semaphore state */
+uint32_t kernel_sem_get_count(const kernel_sem_t *sem);
+
+
+/*
+  Changes the maximum number of tokens allowed by the semaphore.
+  new_max_count : New maximum token count
+  The new maximum must be compatible with the current semaphore state.
+*/
+queue_status_t kernel_sem_set_max_count(kernel_sem_t *sem, uint32_t new_max_count);
+
+/*
+  Changes the current number of available tokens in the semaphore.
+  new_count : New current token count
+  The new count must be greater than zero and must not exceed max_count.
+ */
+queue_status_t kernel_sem_set_count(kernel_sem_t *sem, uint32_t new_count);
+
+/*
+  ISR-safe version of kernel_sem_give().
+  Releases one semaphore token from interrupt context.
+  px_higher_priority_task_woken is set to true if giving the
+  semaphore unblocks a task with a higher priority than the 
+  currently running task, allowing the ISR exit code to request a context switch.
+*/
+queue_status_t kernel_sem_give_from_isr(kernel_sem_t *sem, bool *px_higher_priority_task_woken);
+
+/*
+  ISR-safe version of kernel_sem_take().
+  
+  Attempts to acquire one semaphore token from interrupt context.
+  Unlike the task-context version, this operation must not block the current execution context or wait for a timeout.
+*/
+queue_status_t kernel_sem_take_from_isr(kernel_sem_t *sem);
+
+/* ISR-safe version of kernel_sem_get_count().
+  Returns the current number of available tokens without modifying the semaphore.
+*/
+uint32_t kernel_sem_get_count_from_isr(const kernel_sem_t *sem);
+
+#endif
+#include "../Inc/semaphore.h"
+#include "../Inc/scheduler.h"
+#include "../Port/Cortex_M4/Inc/port.h"
+
+#define SEM_INVALID_COUNT 0xFFFFFFFFU
+
+queue_status_t kernel_sem_init(kernel_sem_t *sem, uint32_t initial_count, uint32_t max_count)
+{
+    if ((sem == NULL) || (max_count == 0U) || (initial_count > max_count))
+    {
+        return QUEUE_INIT_FAILED;
+    }
+
+    port_critical_enter();
+
+    sem->count = initial_count;
+    sem->max_count = max_count;
+    sem->waiters.head = NULL;
+    sem->waiters.tail = NULL;
+
+    port_critical_exit();
+    return QUEUE_INIT_SUCCESS;
+}
+
+queue_status_t kernel_sem_set_max_count(kernel_sem_t *sem, uint32_t new_max_count)
+{
+    if ((sem == NULL) || (new_max_count == 0U))
+    {
+        return QUEUE_FAILED;
+    }
+
+    port_critical_enter();
+
+    if (new_max_count < sem->count)
+    {
+        port_critical_exit();
+        return QUEUE_FAILED;
+    }
+
+    sem->max_count = new_max_count;
+
+    port_critical_exit();
+    return QUEUE_PASSED;
+}
+
+queue_status_t kernel_sem_set_count(kernel_sem_t *sem, uint32_t new_count){
+    if ((sem == NULL) || (new_count == 0U))
+    {
+        return QUEUE_FAILED;
+    }
+
+    port_critical_enter();
+
+    if (new_count > sem->max_count)
+    {
+        port_critical_exit();
+        return QUEUE_FAILED;
+    }
+
+    sem->count = new_count;
+
+    port_critical_exit();
+    return QUEUE_PASSED;
+}
+
+queue_status_t kernel_sem_take(kernel_sem_t *sem, uint32_t timeout_ticks)
+{
+    if (sem == NULL)
+    {
+        return QUEUE_FAILED;
+    }
+
+    port_critical_enter();
+
+    if (sem->count > 0U)
+    {
+        sem->count--;
+        port_critical_exit();
+        return QUEUE_PASSED;
+    }
+
+    if (timeout_ticks == 0U)
+    {
+        port_critical_exit();
+        return QUEUE_FAILED;
+    }
+
+    if (current_task == NULL)
+    {
+        port_critical_exit();
+        return QUEUE_FAILED;
+    }
+
+    current_task->timed_out = 0U;
+    current_task->wakeup_tick = kernel_get_tick_count() + timeout_ticks;
+    current_task->current_wait_queue = &sem->waiters;
+    current_task->state = TASK_STATE_BLOCKED;
+    task_queue_push_task(&sem->waiters, current_task);
+
+    port_critical_exit();
+    kernel_yield();
+
+    port_critical_enter();
+    if (current_task->current_wait_queue != NULL)
+    {
+        task_queue_remove(current_task->current_wait_queue, current_task);
+        current_task->current_wait_queue = NULL;
+    }
+
+    if (current_task->timed_out)
+    {
+        port_critical_exit();
+        return QUEUE_TIMED_OUT;
+    }
+
+    port_critical_exit();
+    return QUEUE_PASSED;
+}
+
+queue_status_t kernel_sem_give(kernel_sem_t *sem)
+{
+    if (sem == NULL)
+    {
+        return QUEUE_FAILED;
+    }
+
+    port_critical_enter();
+
+    if (!task_queue_empty(&sem->waiters))
+    {
+        TCB_t *woken = task_queue_pop_task(&sem->waiters);
+        if (woken == NULL)
+        {
+            port_critical_exit();
+            return QUEUE_FAILED;
+        }
+
+        woken->current_wait_queue = NULL;
+        woken->state = TASK_STATE_READY;
+        port_trigger_context_switch();
+    }
+    else
+    {
+        if (sem->count >= sem->max_count)
+        {
+            port_critical_exit();
+            return QUEUE_FAILED;
+        }
+        sem->count++;
+    }
+
+    port_critical_exit();
+    return QUEUE_PASSED;
+}
+
+uint32_t kernel_sem_get_count(const kernel_sem_t *sem)
+{
+    if (sem == NULL)
+    {
+        return SEM_INVALID_COUNT;
+    }
+
+    port_critical_enter();
+    uint32_t count = sem->count;
+    port_critical_exit();
+
+    return count;
+}
+
+queue_status_t kernel_sem_give_from_isr(kernel_sem_t *sem, bool *px_higher_priority_task_woken)
+{
+    if (sem == NULL)
+    {
+        return QUEUE_FAILED;
+    }
+
+    port_critical_enter();
+
+    if (!task_queue_empty(&sem->waiters))
+    {
+        TCB_t *woken = task_queue_pop_task(&sem->waiters);
+        if (woken == NULL)
+        {
+            port_critical_exit();
+            return QUEUE_FAILED;
+        }
+
+        woken->current_wait_queue = NULL;
+        woken->state = TASK_STATE_READY;
+
+        if ((px_higher_priority_task_woken != NULL) &&
+            (current_task != NULL) &&
+            (woken->priority < current_task->priority))
+        {
+            *px_higher_priority_task_woken = true;
+        }
+
+    }
+    else
+    {
+        if (sem->count >= sem->max_count)
+        {
+            port_critical_exit();
+            return QUEUE_FAILED;
+        }
+        sem->count++;
+    }
+
+    port_critical_exit();
+    return QUEUE_PASSED;
+}
+
+queue_status_t kernel_sem_take_from_isr(kernel_sem_t *sem)
+{
+    if (sem == NULL)
+    {
+        return QUEUE_FAILED;
+    }
+
+    port_critical_enter();
+
+    if (sem->count > 0U)
+    {
+        sem->count--;
+        port_critical_exit();
+        return QUEUE_PASSED;
+    }
+
+    /* No blocking from ISR context — fail immediately. */
+    port_critical_exit();
+    return QUEUE_FAILED;
+}
+
+uint32_t kernel_sem_get_count_from_isr(const kernel_sem_t *sem)
+{
+    if (sem == NULL)
+    {
+        return SEM_INVALID_COUNT;
+    }
+
+    /* Single aligned 32-bit load is atomic on Cortex-M4 — no lock needed. */
+    return sem->count;
+}
+#ifndef QUEUE_H
+#define QUEUE_H
+#include "task.h"
+ 
+#include <stdint.h>
+#include <stdbool.h>
+ 
+/* Task waiting queue. 
+    Stores tasks that are currently blocked while waiting for a resource, event, or queue operation
+*/
+struct task_queue_t
+{
+    TCB_t *head;        // First task in the waiting queue
+    TCB_t *tail;        // Last task in the waiting queue
+};
+
+
+/* Kernel message queue.
+    Stores fixed-size items in a circular buffer and maintains separate waiting queues for tasks trying to send or receive
+*/
+typedef struct
+{
+    uint8_t *buffer;            // Memory buffer used to store queue items
+    uint8_t capacity;           // Maximum number of items the queue can hold
+    uint16_t item_size;         // Size of each item in bytes
+
+    /*
+        Circular buffer indexes.
+        head : position from which the next item is read
+        tail : position at which the next item is written
+    */
+    uint8_t head;
+    uint8_t tail;
+
+    uint8_t count;      // Current number of items in the queue
+
+    /*
+        Indicates that an overflow condition occurred.
+        Set when an item cannot be inserted because the queue is full.
+    */
+    uint8_t overflow_flag;
+
+    /* Tasks blocked because the queue is full and they are waiting to send an item */
+    task_queue_t senders_waiting;
+
+    /* Tasks blocked because the queue is empty and they are waiting to receive an item */
+    task_queue_t receivers_waiting;
+} kernel_queue_t;
+
+
+/* Result codes returned by queue operations */
+typedef enum
+{
+    QUEUE_INIT_FAILED = 0,      // Queue initialization failed
+    QUEUE_INIT_SUCCESS,         // Queue successfully initialized
+    QUEUE_PASSED,               // Operation completed successfully
+    QUEUE_FAILED,               // Operation failed
+    QUEUE_TIMED_OUT             // Operation could not complete before timeout
+} queue_status_t;
+
+
+/* Initializes a kernel message queue.
+
+    q : Queue to initialize
+    buffer : Memory area used to store queue items
+    capacity : Maximum number of items that can be stored
+    item_size: Size of each item in bytes
+*/
+queue_status_t kernel_queue_init(kernel_queue_t *q, void *buffer, uint8_t capacity, uint16_t item_size);
+
+/*  Inserts one item into the queue.
+    This is the low-level, non-blocking operation. The function fails if the queue is full
+*/
+queue_status_t kernel_queue_push(kernel_queue_t *q, const void *data);
+
+/*
+    Removes one item from the queue.
+    This is the low-level, non-blocking operation. The function fails if the queue is empty
+*/
+queue_status_t kernel_queue_pop(kernel_queue_t *q, void *data);
+
+/* Adds a task inside a task waiting queue where tasks are sorted by their priority */
+void task_queue_push_task(task_queue_t *q, TCB_t *task_tcb);
+
+/*
+    Removes and returns the first task from a waiting queue.
+    Returns NULL if the queue is empty.
+ */
+TCB_t *task_queue_pop_task(task_queue_t *q);
+
+/* Checks whether a task waiting queue is empty.
+    Returns true if no task is waiting.
+*/
+bool task_queue_empty(task_queue_t *q);
+
+/*  Removes a specific task from a waiting queue.
+    Returns true if the task was found and removed, otherwise returns false.
+*/
+bool task_queue_remove(task_queue_t *q, TCB_t *task);
+
+/*  Sends an item to the queue.
+    If the queue is full, the calling task may be blocked until space becomes available or the timeout expires
+    timeout_ticks : Maximum number of ticks to wait
+*/
+queue_status_t kernel_queue_send(kernel_queue_t *q, const void *item, uint32_t timeout_ticks);
+
+/*  Receives an item from the queue.
+    If the queue is empty, the calling task may be blocked until an item becomes available or the timeout expires
+    timeout_ticks : Maximum number of ticks to wait
+*/
+queue_status_t kernel_queue_receive(kernel_queue_t *q, void *item, uint32_t timeout_ticks);
+
+/*  ISR-safe version of kernel_queue_send().
+    Attempts to send an item without blocking. The operation returns immediately if the queue is full
+*/
+queue_status_t kernel_queue_send_from_isr(kernel_queue_t *q, const void *item);
+
+/*  ISR-safe version of kernel_queue_receive().
+    Attempts to receive an item without blocking. The operation returns immediately if the queue is empty
+*/
+queue_status_t kernel_queue_receive_from_isr(kernel_queue_t *q, void *item);
+
+#endif
+ 
+#include "../Inc/queue.h"
+#include "../Inc/scheduler.h"
+#include <string.h>
+ 
+/*
+	Initializes a kernel queue by configuring its storage buffer,
+	resetting the circular buffer state, and preparing the sender and receiver waiting queues for operation.
+*/
+queue_status_t kernel_queue_init(kernel_queue_t *q, void *buffer, uint8_t capacity, uint16_t item_size)
+{
+    if ((q == NULL) || (buffer == NULL) || (capacity == 0U) || (item_size == 0U))
+    {
+        return QUEUE_INIT_FAILED;
+    }
+	port_critical_enter();
+    q->buffer=(uint8_t *)buffer;
+    q->capacity=capacity;
+    q->item_size=item_size;
+    q->head=0;
+    q->tail=0;
+    q->count=0;
+    q->overflow_flag=0;
+    
+    q->senders_waiting.head=NULL;
+    q->senders_waiting.tail=NULL;
+    
+    q->receivers_waiting.head=NULL;
+    q->receivers_waiting.tail=NULL;
+    
+    port_critical_exit();
+    return QUEUE_INIT_SUCCESS;
+}
+ 
+/* 
+	Inserts a new item into the circular buffer if space is available.
+	Updates the queue state and returns the appropriate status.
+*/
+queue_status_t kernel_queue_push(kernel_queue_t *q, const void *data)
+{
+    if (q->count==q->capacity)
+    {
+        q->overflow_flag = 1;
+        return QUEUE_FAILED;
+    }
+    memcpy(&q->buffer[q->tail*q->item_size], data, q->item_size);
+    q->tail = (q->tail+1) % q->capacity;
+    q->count++;
+    return QUEUE_PASSED;
+}
+ 
+/*
+	Removes the oldest item from the circular buffer, updates the queue
+	state, and returns the appropriate operation status.
+*/
+queue_status_t kernel_queue_pop(kernel_queue_t *q, void *data)
+{
+    if (q->count==0)
+    {
+        return QUEUE_FAILED;
+    }
+    memcpy(data, &q->buffer[q->head*q->item_size], q->item_size);
+    q->head = (q->head+1) % q->capacity;
+    q->count--;
+
+    return QUEUE_PASSED;
+}
+ 
+/*
+    Inserts a task into the waiting queue while maintaining ascending
+    priority order. Tasks with the same priority are kept in FIFO order,
+    meaning the task that arrived first is placed before later tasks with the same priority.
+*/
+void task_queue_push_task(task_queue_t *q, TCB_t *task_tcb)
+{
+    if ((q == NULL) || (task_tcb == NULL))
+    {
+        return;
+    }
+
+    task_tcb->next = NULL;
+
+    /* Queue empty */
+    if (q->head == NULL)
+    {
+        q->head = task_tcb;
+        q->tail = task_tcb;
+        return;
+    }
+
+    /* New task has the highest priority */
+    if (task_tcb->priority < q->head->priority)
+    {
+        task_tcb->next = q->head;
+        q->head = task_tcb;
+        return;
+    }
+
+    /* Find insertion position */
+    TCB_t *current = q->head;
+
+    while ((current->next != NULL) &&
+           (current->next->priority <= task_tcb->priority))
+    {
+        current = current->next;
+    }
+
+    task_tcb->next = current->next;
+    current->next = task_tcb;
+
+    /* New task was inserted at the end */
+    if (task_tcb->next == NULL)
+    {
+        q->tail = task_tcb;
+    }
+}
+
+/*
+    Removes and returns the highest-priority task from the waiting queue.
+    The queue is already sorted by priority, so the task at the head
+    of the queue is always the next task to be released.
+*/
+TCB_t *task_queue_pop_task(task_queue_t *q)
+{
+    if ((q == NULL) || (q->head == NULL))
+    {
+        return NULL;
+    }
+
+    TCB_t *task = q->head;
+
+    q->head = task->next;
+
+    if (q->head == NULL)
+    {
+        q->tail = NULL;
+    }
+
+    task->next = NULL;
+
+    return task;
+}
+ 
+// Checks whether the specified waiting queue contains any blocked tasks.
+bool task_queue_empty(task_queue_t *q){
+    return (q == NULL) || (q->head == NULL);
+}
+ 
+// Removes a specific task from a waiting queue regardless of its position and updates the queue links accordingly.
+// Useful when we remove tasks based on a specific parameter (ex: emergency)
+bool task_queue_remove(task_queue_t *q, TCB_t *task){
+    if ((q == NULL) || (task == NULL) || (q->head == NULL))
+    {
+        return false;
+    }
+ 
+    TCB_t *prev = NULL;
+    TCB_t *curr = q->head;
+ 
+    while (curr != NULL)
+    {
+        if (curr == task)
+        {
+            if (prev == NULL)
+            {
+                q->head = curr->next;
+            }
+            else
+            {
+                prev->next = curr->next;
+            }
+ 
+            if (curr == q->tail)
+            {
+                q->tail = prev;
+            }
+ 
+            curr->next = NULL;
+            return true;
+        }
+ 
+        prev = curr;
+        curr = curr->next;
+    }
+ 
+    return false;
+}
+ 
+/*
+	Sends an item to a kernel queue. If the queue is full, the calling task may block until space becomes available
+	// or the specified timeout expires. 
+	Waiting receiver tasks are awakened when new data becomes available.
+ 
+	Blocking model (matches TCB_t / scheduler.h):
+	  - current_task is the running task (extern in scheduler.h).
+	  - Blocking is done by setting current_task->state = TASK_STATE_BLOCKED,
+	    recording current_wait_queue + an absolute deadline tick in
+	    current_task->wakeup_tick (kernel_get_tick_count() + timeout_ticks),
+	    linking the task into the queue's wait list (plain priority-based sorted append, 1st task is the 
+        Highest-priority task--
+	    see task_queue_push_task()), then calling kernel_yield() to force a
+	    context switch. kernel_yield() is assumed to block until this task
+	    is scheduled again (same pattern as task_delay()).
+	  - Whichever side wakes a waiting task (either the opposite send/receive
+	    call via task_queue_pop_task(), or kernel_tick_check_timeouts() via
+	    task_queue_remove() on expiry) is responsible for unlinking it from
+	    the wait list and setting state back to READY -- so a task never
+	    needs to remove itself from the list it was on.
+	  - task_queue_pop_task() removes the HIGHEST-PRIORITY task which is the first task --
+	    see the comment on task_queue_pop_task().
+	  - task->timed_out distinguishes why we woke up.
+	  - Wakeup_tick is now an ABSOLUTE deadline tick rather than a
+	    per-tick decremented countdown: kernel_tick_check_timeouts()
+	    simply compares kernel_get_tick_count() against it instead of
+	    counting down every tick.
+*/
+queue_status_t kernel_queue_send(kernel_queue_t *q, const void *item, uint32_t timeout_ticks){
+    queue_status_t status;
+    if ((q == NULL) || (item == NULL))
+    {
+        return QUEUE_FAILED;
+    }
+ 
+    port_critical_enter();
+
+    bool yield_requested=false;
+
+    /*
+        Direct hand-off: a receiver is already blocked waiting for the
+        next item. Copy straight into its destination buffer instead of
+        going through the ring buffer, that gap (drop item, then wake
+        the receiver to come fetch it later) is what let a third task's
+        fast path steal the item before the woken receiver got to run.
+    */
+    if (!task_queue_empty(&q->receivers_waiting))
+    {
+        TCB_t *woken = task_queue_pop_task(&q->receivers_waiting);
+        memcpy(woken->pending_item, item, q->item_size);
+        woken->current_wait_queue = NULL;
+        woken->state = TASK_STATE_READY;
+
+        if(woken->priority<current_task->priority){
+            yield_requested=true;
+        }
+
+        port_critical_exit();
+
+        if (yield_requested){
+            port_trigger_context_switch();
+        }
+
+        return QUEUE_PASSED;
+    }
+
+    if (q->count < q->capacity)
+    {
+        /* Fast path: room available, nobody waiting, nothing to race with. */
+        status=kernel_queue_push(q, item);
+
+        port_critical_exit();
+
+        return status;
+    }
+
+    if (timeout_ticks == 0U)
+    {
+        /* Queue full and caller doesn't want to wait. */
+        port_critical_exit();
+        return QUEUE_FAILED;
+    }
+
+    /* 
+        Queue is full: block the calling task until space frees up or timeout expires.
+        tick_counter now holds an ABSOLUTE deadline tick, not a countdown. 
+    */
+    current_task->timed_out = 0U;
+    current_task->wakeup_tick = kernel_get_tick_count() + timeout_ticks;
+    current_task->current_wait_queue = &q->senders_waiting;
+    current_task->pending_item = (void *)item;   /* our source buffer, for whoever wakes us */
+    current_task->state = TASK_STATE_BLOCKED;
+    task_queue_push_task(&q->senders_waiting, current_task);
+
+    port_critical_exit();
+
+    /* Give up the CPU; we resume here once woken by a receiver or timed out. */
+    port_trigger_context_switch();
+
+    port_critical_enter();
+
+    current_task->pending_item = NULL;
+
+    if (current_task->timed_out)
+    {
+        port_critical_exit();
+        return QUEUE_TIMED_OUT;
+    }
+
+    /*
+        Whoever woke us (kernel_queue_receive()'s fast path) already
+        copied our item into the buffer for us -- nothing left to do here.
+    */
+    port_critical_exit();
+
+    return QUEUE_PASSED;
+}
+ 
+/* 
+	Receives an item from a kernel queue. If the queue is empty, the calling task may block until data becomes available
+	or the specified timeout expires. 
+	Waiting sender tasks are awakened when space becomes available.
+ 
+	Mirrors kernel_queue_send() -- see the comment above it for the blocking model.
+ */
+queue_status_t kernel_queue_receive(kernel_queue_t *q, void *item, uint32_t timeout_ticks){
+    queue_status_t status;
+ 
+    if ((q == NULL) || (item == NULL))
+    {
+        return QUEUE_FAILED;
+    }
+ 
+    port_critical_enter();
+    
+    bool yield_requested=false;
+    if (q->count > 0U)
+    {
+        /* Fast path: data available, no blocking needed. */
+        status=kernel_queue_pop(q, item);
+
+        /*
+            A slot just freed up. If a sender is already blocked waiting
+            for exactly this slot, refill the buffer from their pending
+            item right now, in this same critical section -- otherwise a
+            third task's fast-path send() could steal the freed slot
+            before the waiting sender gets to run.
+        */
+        if (!task_queue_empty(&q->senders_waiting))
+        {
+            TCB_t *woken = task_queue_pop_task(&q->senders_waiting);
+            (void)kernel_queue_push(q, woken->pending_item);
+            woken->current_wait_queue = NULL;
+            woken->state = TASK_STATE_READY;
+
+            if(woken->priority < current_task->priority){
+                yield_requested=true;
+            }
+        }
+
+        port_critical_exit();
+
+        if(yield_requested)
+        {
+            port_trigger_context_switch();
+        }
+
+        return status;
+    }
+
+    if (timeout_ticks == 0U)
+    {
+        /* Queue empty and caller doesn't want to wait. */
+        port_critical_exit();
+        return QUEUE_FAILED;
+    }
+
+    /* Queue is empty: block the calling task until data arrives or timeout expires.
+       wakeup_tick now holds an ABSOLUTE deadline tick, not a countdown. */
+    current_task->timed_out = 0U;
+    current_task->wakeup_tick = kernel_get_tick_count() + timeout_ticks;
+    current_task->current_wait_queue = &q->receivers_waiting;
+    current_task->pending_item = item;   /* our destination buffer, for whoever wakes us */
+    current_task->state = TASK_STATE_BLOCKED;
+    task_queue_push_task(&q->receivers_waiting, current_task);
+
+    port_critical_exit();
+
+    /* Give up the CPU; we resume here once woken (by a sender) or timed out. */
+    port_trigger_context_switch();
+
+    port_critical_enter();
+
+    current_task->pending_item = NULL;
+
+    if (current_task->timed_out)
+    {
+        port_critical_exit();
+        return QUEUE_TIMED_OUT;
+    }
+
+    /*
+        Whoever woke us (kernel_queue_send()'s direct hand-off) already
+        copied the item into *item for us -- nothing left to do here.
+    */
+    port_critical_exit();
+    return QUEUE_PASSED;
+}
+
+queue_status_t kernel_queue_send_from_isr(kernel_queue_t *q, const void *item)
+{
+    if ((q == NULL) || (item == NULL))
+    {
+        return QUEUE_FAILED;
+    }
+
+    bool yield_requested=false;
+
+    /* Direct hand-off, same reasoning as the task-context fast path. */
+    if (!task_queue_empty(&q->receivers_waiting))
+    {
+        TCB_t *woken = task_queue_pop_task(&q->receivers_waiting);
+
+        memcpy(woken->pending_item, item, q->item_size);
+        woken->current_wait_queue = NULL;
+        woken->state = TASK_STATE_READY;
+
+        if ((current_task != NULL) && (woken->priority < current_task->priority))
+        {
+            yield_requested=true;
+        }
+
+        kernel_yield_from_isr(yield_requested);
+        return QUEUE_PASSED;
+    }
+
+    /* ISR-safe API: Never block. If the queue is full, return immediately */
+    if (q->count >= q->capacity)
+    {
+        return QUEUE_FAILED;
+    }
+
+    (void)kernel_queue_push(q, item);
+
+    return QUEUE_PASSED;
+}
+
+queue_status_t kernel_queue_receive_from_isr(kernel_queue_t *q, void *item)
+{
+    if ((q == NULL) || (item == NULL))
+    {
+        return QUEUE_FAILED;
+    }
+
+    /* ISR-safe API: Never block. If the queue is empty, return immediately */
+    if (q->count == 0U)
+    {
+        return QUEUE_FAILED;
+    }
+
+    (void)kernel_queue_pop(q, item);
+
+    /* A slot just freed -- refill it from a waiting sender's pending item
+       right now, same reasoning as the task-context fast path. */
+    bool yield_requested=false;
+    if (!task_queue_empty(&q->senders_waiting))
+    {
+        TCB_t *woken = task_queue_pop_task(&q->senders_waiting);
+
+        (void)kernel_queue_push(q, woken->pending_item);
+        woken->current_wait_queue = NULL;
+        woken->state = TASK_STATE_READY;
+
+        /* Request a context switch if the awakened task has a higher priority */
+        if ((current_task != NULL) && (woken->priority < current_task->priority))
+        {
+            yield_requested=true;
+        }
+    }
+    kernel_yield_from_isr(yield_requested);
+
+    return QUEUE_PASSED;
+}#ifndef NOTIFICATION_H
+#define NOTIFICATION_H
+
+#include <stdbool.h>
+#include <stdint.h>
+
+#include "queue.h"
+
+// This is actual notification 
+typedef struct
+{
+    bool pending; // pending = YES -> means a notification has arrived , = NO means no new notification
+
+    // Tasks blocked in the queue waiting for the notification 
+    task_queue_t waiters;
+
+} kernel_notification_t;
+
+
+//this is a class which stores status of the notification and used as the return type for the implementation of function
+typedef enum
+{
+    NOTIFICATION_SUCCESS = 0, // notification sent successfully
+    NOTIFICATION_ERROR,       // notification not sent bcz no notification instance is available,etc
+    NOTIFICATION_EMPTY        // no notification available to be consumed
+
+} notification_status_t;
+ 
+// Initialize a notification object.
+notification_status_t kernel_notification_init(kernel_notification_t *notification); // the pointer points to the notification object created
+
+//this fxn a task will call to be in sleep mode untill a notification has addressed them 
+notification_status_t kernel_notification_wait(
+    kernel_notification_t *notification, //pointer to notification
+    uint32_t timeout_ticks               //ticks to wait
+);
+
+//this is the actual messenger that tells a task to wake up from sleep mode/blocked mode
+notification_status_t kernel_notification_notify(kernel_notification_t *notification);
+
+//ISR safe API
+notification_status_t kernel_notification_wait_from_isr(kernel_notification_t *notification);
+notification_status_t kernel_notification_notify_from_isr(kernel_notification_t *notification);
+
+#endif
+
+#include "../Inc/Notification.h"
+#include "../Inc/scheduler.h"
+#include "../Port/Cortex_M4/Inc/port.h"
+#include <stddef.h>
+
+//===================================================================================================================================
+//creatre a notification
+notification_status_t kernel_notification_init(kernel_notification_t *notification){
+
+    if (notification == NULL) // no valid instance of notication passed
+    {
+        return NOTIFICATION_ERROR;
+    }
+
+    port_critical_enter(); // we entr this because we dont want any other task to modify the daa we are modifying right now
+    //create a notification
+    notification->pending = false;
+
+    notification->waiters.head = NULL;
+    notification->waiters.tail = NULL;
+
+    port_critical_exit();
+
+    return NOTIFICATION_SUCCESS;
+}
+
+
+//=================================================================================================================================
+//make a task wait untill notification arrives
+notification_status_t kernel_notification_wait( kernel_notification_t *notification, uint32_t timeout_ticks)
+{
+    if (notification == NULL)
+    {
+        return NOTIFICATION_ERROR;
+    }
+
+    if (current_task == NULL)
+    {
+        return NOTIFICATION_ERROR;
+    }
+
+    port_critical_enter();
+
+    /*
+     * A notification is already pending.
+     * Consume it immediately.
+     */
+    if (notification->pending)
+    {
+        notification->pending = false;
+        current_task->timed_out = 0U;
+
+        port_critical_exit();
+
+        return NOTIFICATION_SUCCESS;
+    }
+
+    /*
+     * Zero timeout means:
+     * check immediately without blocking.
+     */
+    if (timeout_ticks == 0U)
+    {
+        port_critical_exit();
+
+        return NOTIFICATION_EMPTY;
+    }
+
+    /*
+     * No notification is available.
+     * Block the current task until either:
+     * ---> A notification arrives, or
+     * ---> timeout_ticks expires.
+     */
+    current_task->timed_out = 0U;
+
+    current_task->wakeup_tick = kernel_get_tick_count() + timeout_ticks;
+
+    current_task->current_wait_queue = &notification->waiters;
+
+    current_task->state = TASK_STATE_BLOCKED;
+
+    task_queue_push_task(&notification->waiters, current_task);
+
+    port_critical_exit();
+
+    /*
+     * Give the CPU to another task.
+     */
+    port_trigger_context_switch();
+
+    /*
+     * We have been scheduled again.
+     * Determine why we woke up.
+     */
+    if (current_task->timed_out)
+    {
+        return NOTIFICATION_EMPTY;
+    }
+
+    return NOTIFICATION_SUCCESS;
+}
+
+
+//======================================================================================================================================
+//This will do the actual notifying and waking-up job
+notification_status_t kernel_notification_notify(kernel_notification_t *notification){
+
+    if (notification == NULL)
+    {
+        return NOTIFICATION_ERROR;
+    }
+
+    port_critical_enter();
+
+    /* If a task is waiting, wake one waiting task */
+    bool yield_requested=false;
+   
+    if (!task_queue_empty(&notification->waiters)) //task_queue_empty is a bool type , so should return 1/0
+    {                                              // 1- queue is empty
+                                                   // 0- queue is not empty (in this case this block will execute and pop one task from the queue and wake it)
+        TCB_t *woken = task_queue_pop_task(&notification->waiters); //Remove-pop the first-highest-priority task from a waiting queue 
+                                                                    //and return a pointer to that task's TCB.
+
+        if (woken == NULL) // check if task poped or not 
+        {
+            port_critical_exit();
+
+            return NOTIFICATION_ERROR;
+        }
+        
+        //unblocking the task
+        woken->current_wait_queue = NULL; // removing the current task from waiting queue
+        woken->timed_out = 0U;            //task has just unblocked ,, so ticks have been reset
+        woken->state = TASK_STATE_READY; // task unblocked
+        if(current_task->priority > woken->priority){
+            yield_requested=true;
+        }
+    }
+    else //no task is waiting , since waiter is NULL 
+        //in this case we should save the notification for future API'S to consume the notification 
+        // In future "kernel_notification_wait" , can consume the saved notification because this function was waiting for a notification
+    {
+        notification->pending = true; // save the unused notification to pending state for future use
+    }
+
+    port_critical_exit();
+
+    // if the if condition on line : 81 is true , then by the time when that block completes execution , there is a task ready and
+    // we are subjecting that task to be scheduled by the schedular as usual based on the priority this task has as compared to other tasks
+    // we do this by doing the below API call
+    if(yield_requested){
+        kernel_yield();
+    }
+
+    return NOTIFICATION_SUCCESS;
+}
+
+
+
+    //ISR safe API'S implementation
+
+    //======================================================================================================================================================
+    notification_status_t kernel_notification_wait_from_isr(kernel_notification_t *notification){
+    if (notification == NULL){
+        return NOTIFICATION_ERROR;
+    }
+
+    if (notification->pending)
+    {
+        notification->pending = false; // consume the notification and change its status
+        return NOTIFICATION_SUCCESS;
+    }
+    else
+    {                              
+        return NOTIFICATION_EMPTY; // Interrupts cannot block to wait for a notification
+    }
+
+    }
+
+    //=========================================================================================================================================================
+    notification_status_t kernel_notification_notify_from_isr(kernel_notification_t *notification){
+    if (notification == NULL) //check for bad notification pointer passed
+    {
+        return NOTIFICATION_ERROR;
+    }
+
+    bool yield_requested = false;
+
+    if (!task_queue_empty(&notification->waiters)){                                   
+        TCB_t *woken = task_queue_pop_task(&notification->waiters); 
+
+        if (woken == NULL)
+        {
+            return NOTIFICATION_ERROR;
+        }
+
+        woken->current_wait_queue = NULL;
+        woken->state = TASK_STATE_READY;
+
+        if ((current_task != NULL) && (woken->priority < current_task->priority)){ //means woken task is having more priority , lesser means more priority , then it needs to be scheduled
+            yield_requested = true; 
+        }
+    }
+    else        
+    {
+        notification->pending = true;
+    }
+
+    kernel_yield_from_isr(yield_requested);
+
+    return NOTIFICATION_SUCCESS;
+}
+
+    //=============================================================================================================================================================================
+
+#ifndef KERNEL_MAILBOX_H
+#define KERNEL_MAILBOX_H
+
+#include <stdint.h>
+#include <stdbool.h>
+#include <stddef.h>
+
+/* Maximum size, in bytes, of any single item stored in the mailbox.
+   Must be >= sizeof() of the largest type we plan to post. */
+#define MAILBOX_MAX_ITEM_SIZE 64
+
+/* Status type for mailbox operations */
+typedef enum
+{
+	MAILBOX_INIT_SUCCEED=0, 	// Creation of mailbox succeed
+	MAILBOX_INIT_FAILED, 	// Creation of mailbox failed
+   MAILBOX_EMPTY,   		// receive() called but no data has ever been posted
+   MAILBOX_OK          	// receive() returns this when data is present
+} mailbox_status_t;
+
+typedef struct
+{
+    uint8_t buffer[MAILBOX_MAX_ITEM_SIZE];
+    uint32_t item_size;
+    bool has_data;
+} kernel_mailbox_t;
+
+/* Initializes a statically-declared kernel_mailbox_t instance */
+mailbox_status_t kernel_mailbox_init(kernel_mailbox_t *mb, uint32_t item_size);
+
+/* Copies item into the mailbox, overwriting any previous value
+   Never blocks, never fails */
+void kernel_mailbox_send(kernel_mailbox_t *mb, const void *item);
+
+/* Copies the current value out of the mailbox into item.
+   Returns MAILBOX_OK if data was present, MAILBOX_EMPTY otherwise */
+mailbox_status_t kernel_mailbox_receive(kernel_mailbox_t *mb, void *item);
+
+#endif /* KERNEL_MAILBOX_H */
+#include "mailbox.h"
+#include <string.h>
+#include "../Port/Cortex_M4/Inc/port.h"
+
+mailbox_status_t kernel_mailbox_init(kernel_mailbox_t *mb, uint32_t item_size)
+{
+	if((mb==NULL) || (item_size<=0)){
+		return MAILBOX_INIT_FAILED;
+	}
+    mb->item_size = item_size;
+    mb->has_data  = false;
+    
+    return MAILBOX_INIT_SUCCEED;
+}
+
+void kernel_mailbox_send(kernel_mailbox_t *mb, const void *item)
+{
+    port_critical_enter();
+    memcpy(mb->buffer, item, mb->item_size);
+    mb->has_data = true;
+    port_critical_exit();
+}
+
+mailbox_status_t kernel_mailbox_receive(kernel_mailbox_t *mb, void *item)
+{
+    mailbox_status_t result = MAILBOX_EMPTY;
+
+    port_critical_enter();
+    if (mb->has_data)
+    {
+        memcpy(item, mb->buffer, mb->item_size);
+        result = MAILBOX_OK;
+    }
+    port_critical_exit();
+
+    return result;
+}
+#ifndef TASK_H
+#define TASK_H
+
+#include<stdint.h>
+#include<stddef.h>
+
+/* Maximum number of tasks that can exist simultaneously */
+#define MAX_TASKS 20
+
+/* Total size of the memory pool dedicated to task stacks, in words */
+#define KERNEL_STACK_POOL_SIZE  8192U
+
+/* Minimum stack size allowed for a task, in words */
+#define TASK_STACK_MIN_WORDS    32
+
+// Possible states of a task
+typedef enum {
+    TASK_STATE_READY=0,       // Task is ready to run and waiting for CPU time
+    TASK_STATE_RUNNING,     // Task is currently executing on the CPU
+    TASK_STATE_BLOCKED,     // Task is waiting for an event, resource, or timeout
+    TASK_STATE_SUSPENDED,   // Task is suspended and cannot be scheduled
+} TaskState_t;
+
+/* Function prototype executed by a task */
+typedef void (*TaskFunction_t)(void *arg);
+
+/* Forward declarations of structures used by the TCB */
+typedef struct task_queue_t task_queue_t;
+typedef struct kernel_mutex_t kernel_mutex_t; 
+
+/*
+ * Task Control Block (TCB)
+ *
+ * Contains all information required by the kernel
+ * to manage and schedule a task.
+ */
+typedef struct TCB_t
+{
+    uint32_t *sp;                       // Current saved stack pointer of the task
+
+    TaskFunction_t task_function;       // Entry function executed by the task
+    void *arg;                          // Argument passed to the task function
+
+    uint8_t priority;                   // Current task priority (may change due to priority inheritance)
+    uint8_t base_priority;              // Original task priority before any priority inheritance
+
+    uint32_t period;                    // Task period, expressed in system ticks
+    TaskState_t state;                  // Current state of the task
+
+    uint32_t wakeup_tick;               // System tick at which a blocked task can wake up
+
+    uint32_t *stack_base;               // Base address of the task's stack
+    uint32_t stack_words;               // Stack size in words (1 word = 4 bytes)
+
+    /* Linked list of mutexes currently owned by this task. Used by the mutex subsystem, for example for priority inheritance */
+    kernel_mutex_t *owned_mutexes;
+
+    /* Mutex on which this task is currently blocked. NULL if the task is not waiting for a mutex */
+    kernel_mutex_t *blocked_on;
+
+    /* Pointer to the next TCB in a waiting queue. Used to implement linked-list based task queues */
+    struct TCB_t *next;
+
+    /* Queue on which the task is currently blocked. NULL when the task is not waiting in a queue */
+    task_queue_t *current_wait_queue;
+
+    /* Indicates whether the task was unblocked because its waiting timeout expired */
+    volatile uint8_t timed_out;
+    
+    /* Scratch pointer used only while this task is blocked inside
+       kernel_queue_send()/kernel_queue_receive(): the sender's source
+       buffer, or the receiver's destination buffer. NULL whenever the
+       task is not blocked on a queue. */
+    void *pending_item;
+
+} TCB_t;
+
+/*
+    Return status of task creation.
+    The kernel uses these values to report whether task creation succeeded or why it failed.
+*/
+typedef enum
+{
+    TASK_CREATE_OK = 0,             // Task successfully created
+    TASK_CREATE_ERR_MAX_TASKS,      // Maximum number of tasks already reached
+    TASK_CREATE_ERR_NO_MEMORY,      // Not enough memory for the task stack
+    TASK_CREATE_ERR_BAD_ARGS        // Invalid task creation parameters
+} task_create_status_t;
+
+/* Initializes the kernel task/stack memory pool */
+void task_pool_init(void);
+
+/*
+    Creates a new task and initializes its TCB and stack.
+
+    fn : Task entry function
+    arg : Argument passed to the task
+    priority : Initial task priority
+    stack_words : Requested stack size in words
+    period : Task period in system ticks
+*/
+task_create_status_t kernel_task_create(TaskFunction_t fn, void *arg, uint8_t priority, uint32_t stack_words, uint32_t period);
+
+
+/* Returns a pointer to the TCB associated with the given task ID */
+TCB_t *task_get_TCB(uint8_t id);
+
+/* Returns the task ID associated with the given TCB, or -1 if invalid */
+int8_t task_get_id(const TCB_t *task);
+
+/* Returns the current number of created tasks */
+uint8_t kernel_task_count(void);
+
+/* Creates the kernel's idle task. This task runs when no other task is ready to execute */
+task_create_status_t idle_task_create(void);
+
+/* Global task table containing the TCB of every created task */
+extern TCB_t task_table[MAX_TASKS];
+
+/* Number of currently created tasks */
+extern uint8_t total_tasks;
+
+#endif#include "../Inc/task.h"
+#include "../Inc/scheduler.h"
+#include <stdint.h>
+#include <string.h>
+
+TCB_t task_table[MAX_TASKS];
+uint8_t total_tasks = 0;
+
+static uint32_t stack_pool[KERNEL_STACK_POOL_SIZE] __attribute__((aligned(8)));
+static uint32_t next_free_stack_word = 0;
+
+#define IDLE_STACK_WORDS   32   //minimum number of words
+#define IDLE_PRIORITY      0xFF //least prior
+
+static void idle_task_function(void *arg) {
+    (void)arg;  
+    for (;;) {
+        port_idle();  
+    }
+}
+
+task_create_status_t idle_task_create(void) {
+    return kernel_task_create(idle_task_function, NULL, IDLE_PRIORITY, IDLE_STACK_WORDS, 0U);
+}
+
+void task_pool_init(void) {
+    // Replaces memset: manually zero out the task_table memory
+    uint8_t *ptr = (uint8_t *)task_table;
+    for (uint32_t i = 0; i < sizeof(task_table); i++) {
+        ptr[i] = 0;
+    }
+    
+    total_tasks = 0;
+    next_free_stack_word = 0;
+}
+
+
+task_create_status_t kernel_task_create(TaskFunction_t fn, void *arg, uint8_t priority, uint32_t stack_words, uint32_t period) {
+    if (fn == NULL || stack_words < TASK_STACK_MIN_WORDS){
+        return TASK_CREATE_ERR_BAD_ARGS;
+    }
+    if (total_tasks >= MAX_TASKS) {
+        return TASK_CREATE_ERR_MAX_TASKS;
+    }
+ 
+    // Enforce 8-byte stack alignment 
+    if (stack_words & 1U) {
+        stack_words++;
+    }
+ 
+    task_create_status_t err = TASK_CREATE_OK;
+ 
+    port_critical_enter();
+ 
+    if ((next_free_stack_word + stack_words) > KERNEL_STACK_POOL_SIZE) {
+        err = TASK_CREATE_ERR_NO_MEMORY;
+    } else {
+        uint32_t *stack_base = &stack_pool[next_free_stack_word];
+        uint32_t *stack_top = stack_base + stack_words; /* exclusive top; stack grows down */
+        uint8_t id = total_tasks;
+ 
+        next_free_stack_word += stack_words;
+ 
+        task_table[id].sp = port_stack_init(stack_top, fn, arg);
+        task_table[id].task_function = fn;
+        task_table[id].arg = arg;
+        task_table[id].priority = priority;
+        task_table[id].base_priority = priority;
+        task_table[id].period = period;
+        task_table[id].state = TASK_STATE_READY;
+        task_table[id].wakeup_tick  = 0;
+        task_table[id].stack_base = stack_base;
+        task_table[id].stack_words = stack_words;
+        task_table[id].owned_mutexes = NULL;
+        task_table[id].blocked_on = NULL;
+        task_table[id].current_wait_queue = NULL;
+        task_table[id].timed_out = 0U;
+        task_table[id].next = NULL;
+        task_table[id].pending_item = NULL;
+ 
+        total_tasks++;
+    }
+ 
+    port_critical_exit();
+    return err;
+}
+
+TCB_t *task_get_TCB(uint8_t id) {
+    if (id >= total_tasks) {
+        return NULL;
+    }
+    return &task_table[id];
+}
+
+int8_t task_get_id(const TCB_t *task)
+{
+    if (task == NULL)
+    {
+        return -1;
+    }
+
+    if (task < task_table || task >= (task_table + total_tasks))
+    {
+        return -1;
+    }
+
+    return (int8_t)(task - task_table);
+}
+
+uint8_t kernel_task_count(void) {
+    return total_tasks;
+}
+#ifndef SCHEDULER_H
+#define SCHEDULER_H
+
+#include <stdint.h>
+#include <stdbool.h>
+#include "../Port/Cortex_M4/Inc/port.h" 
+#include "task.h"
+#include "queue.h"
+
+/* Kernel tick frequency */
+#define TICK_RATE_HZ      1000UL
+
+/* Initializes the kernel and its core components. This function must be called before starting the scheduler */
+void kernel_init(void);
+
+/*
+    Starts the kernel scheduler.
+    This function does not return because control is transferred to the scheduler and subsequently to the tasks.
+*/
+void kernel_start(void) __attribute__((noreturn));
+
+/* Voluntarily gives up the CPU. The scheduler is invoked to select the next task to execute */
+void kernel_yield(void);
+
+/* ISR-safe version of kernel_yield(). Requests a context switch after the ISR if a higher-priority task has been woken */
+void kernel_yield_from_isr(bool higher_priority_task_woken);
+
+/*  Updates the kernel time base.
+    Typically called from the system tick interrupt to increment the global tick counter and process time-related task events.
+ */
+void kernel_update_ticks(void);
+
+/* Returns the current system tick count */
+uint32_t kernel_get_tick_count(void);
+
+/* 
+    Selects the highest-priority task that is ready to run
+*/
+void scheduler_select_next_task(void);
+
+/*
+    Blocks the current task for the specified number of system ticks.
+    delay_ticks : Number of ticks for which the task must remain blocked.
+*/
+void task_delay(uint32_t delay_ticks);
+
+/*
+    Blocks the current task until the next periodic release point.
+    previous_wake_tick : Previous scheduled wake-up tick
+    period : Task period in system ticks
+    
+    This function is intended for periodic tasks and helps maintain a regular execution period.
+*/
+void task_delay_until(uint32_t *previous_wake_tick, uint32_t period);
+
+
+/* Converts system ticks to milliseconds */
+uint32_t kernel_ticks_to_ms(uint32_t ticks);
+
+/* Converts milliseconds to system ticks */
+uint32_t kernel_ms_to_ticks(uint32_t ms);
+
+/* Pointer to the TCB of the task currently executing */
+extern TCB_t *current_task;
+
+/* Pointer to the TCB selected by the scheduler for the next context switch */
+extern TCB_t *next_task;
+
+#endif
+#include "../Inc/scheduler.h"
+#include "../Inc/queue.h"
+#include "../Inc/watchdog.h" // added so that watchdog can be initialised
+#include <stddef.h>
+#include <stdint.h>
+
+TCB_t *current_task = NULL;
+TCB_t *next_task = NULL;
+ 
+static int8_t current_task_id = -1;
+/*
+ * Global Monotonic Tick Counter
+ * At TICK_RATE_HZ = 1000, this 32-bit counter will overflow back to 0
+ * every 49.71 days. System delays and timeouts must use unsigned subtraction
+ * (current_tick - start_tick) to safely calculate elapsed time across wraparounds.
+ */
+static volatile uint32_t g_tick_count = 0;
+
+void kernel_init(void)
+{
+    task_pool_init();
+}
+
+static TCB_t *pick_next_task(void)
+{
+    uint8_t count = kernel_task_count();
+
+    if (count == 0) {
+        return NULL;
+    }
+
+    /* Idle task is always the last task created */
+    uint8_t idle_task_id = count - 1;
+
+    uint16_t best_priority = 256;
+    int8_t best_id = -1;
+
+    /* Search all runnable tasks except the Idle Task */
+    for (uint8_t offset = 1; offset <= count; offset++) {
+
+        uint8_t id = (uint8_t)((current_task_id + offset) % count);
+
+        /* Skip Idle Task during normal scheduling */
+        if (id == idle_task_id){
+            continue;
+        }
+
+        TCB_t *t = task_get_TCB(id);
+
+        if ((t->state == TASK_STATE_READY) && (t->priority < best_priority)) {
+            best_priority = t->priority;
+            best_id = id;
+        }
+    }
+
+    /* If no runnable user task exists, run the Idle Task */
+    if(best_id < 0){
+        current_task_id = idle_task_id;
+        return task_get_TCB(idle_task_id);
+    }
+
+    current_task_id = best_id;
+    return task_get_TCB(best_id);
+}
+
+void scheduler_select_next_task(void) {
+    //if task is running and completed it is now sent back to ready state
+    if ((current_task != NULL) && (current_task->state == TASK_STATE_RUNNING)) {
+        current_task->state = TASK_STATE_READY;
+    }
+ 
+    next_task = pick_next_task();
+ 
+    if (next_task != NULL && next_task->state==TASK_STATE_READY){
+        next_task->state = TASK_STATE_RUNNING;
+    }
+}
+
+void kernel_update_ticks(void)
+{
+    g_tick_count++;
+    uint32_t now = kernel_get_tick_count();
+    bool task_woken = false;
+
+    for (uint8_t i=0U; i<total_tasks; i++)
+    {
+        TCB_t *task = &task_table[i];
+
+        if (task->state != TASK_STATE_BLOCKED)
+        {
+            continue;
+        }
+
+        if ((int32_t)(now-task->wakeup_tick) >= 0)
+        {
+            if (task->current_wait_queue != NULL)
+            {
+                (void)task_queue_remove(task->current_wait_queue, task);
+                task->current_wait_queue = NULL;
+                task->timed_out = 1U;
+            }
+
+            task->state = TASK_STATE_READY;
+            task_woken = true;
+        }
+    }
+
+    /* Added this and this will
+     * Check all registered watchdog tasks once per kernel tick.
+     */
+    kernel_watchdog_check();
+
+    if (task_woken)
+    {
+        port_trigger_context_switch();
+    }
+}
+
+uint32_t kernel_get_tick_count(void) {
+    return g_tick_count;
+}
+
+void kernel_yield(void) {
+    port_critical_enter();
+    if ((current_task != NULL) && (current_task->state==TASK_STATE_RUNNING)){
+        current_task->state=TASK_STATE_READY;
+    }
+    port_critical_exit();
+
+    port_trigger_context_switch();
+}
+
+void kernel_start(void) {
+    if (kernel_task_count() == 0U) {
+        while (1) {}
+    }
+
+    /* Create Idle Task LAST so it reliably occupies (total_tasks - 1) */
+    idle_task_create();
+
+    /* THIS IS NEWLY ADDED 
+     * Initialize and start the kernel watchdog
+     * before the scheduler starts executing tasks.
+     */
+    kernel_watchdog_init();
+    kernel_watchdog_start();
+
+    /* Initialize SysTick to 1ms */
+    port_systick_init(TICK_RATE_HZ);
+
+    current_task_id = -1;
+    current_task = NULL;
+
+    port_start_first_task();
+ 
+    while (1) {}
+}
+
+void kernel_yield_from_isr(bool higher_priority_task_woken)
+{
+    if (higher_priority_task_woken)
+    {
+        port_trigger_context_switch();
+    }
+}
+
+
+void task_delay(uint32_t delay_ticks) {
+    if (delay_ticks == 0U)
+    {
+        return;
+    }
+    port_critical_enter();
+
+    current_task->wakeup_tick = kernel_get_tick_count()+delay_ticks;     
+    current_task->state = TASK_STATE_BLOCKED;
+
+    port_critical_exit();
+
+    port_trigger_context_switch();
+}
+
+void task_delay_until(uint32_t *previous_wake_tick, uint32_t period_ticks)
+{
+    if (previous_wake_tick == NULL || period_ticks == 0U)
+    {
+        return;
+    }
+
+    port_critical_enter();
+
+    uint32_t current_tick = kernel_get_tick_count();
+    uint32_t next_wake_tick = *previous_wake_tick + period_ticks;
+
+    /*
+        If the task has already missed its next release, it is not blocked
+    */
+    if ((int32_t)(current_tick - next_wake_tick) >= 0)
+    {
+        *previous_wake_tick = current_tick;
+        port_critical_exit();
+        return;
+    }
+
+    current_task->wakeup_tick = next_wake_tick;
+    current_task->state = TASK_STATE_BLOCKED;
+
+    *previous_wake_tick = next_wake_tick;
+
+    port_critical_exit();
+    port_trigger_context_switch();
+}
+
+/* Converts system ticks to milliseconds */
+uint32_t kernel_ticks_to_ms(uint32_t ticks) {
+    /* Multiplies first to prevent integer division truncation */
+    return (ticks * 1000UL) / TICK_RATE_HZ;
+}
+
+/* Converts milliseconds to system ticks */
+uint32_t kernel_ms_to_ticks(uint32_t ms) {
+    return (ms * TICK_RATE_HZ) / 1000UL;
+}

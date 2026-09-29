@@ -1,0 +1,30 @@
+name: ANSA RTOS Kernel CI
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  build-and-check:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v3
+
+    - name: Install Tools
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y gcc-arm-none-eabi cppcheck
+
+    - name: Run Cppcheck Static Analysis
+      run: |
+        cppcheck --enable=warning,style,performance,portability \
+                 --inline-suppr \
+                 -I Inc/ -I Port/Cortex_M4/Inc/ Src/ Port/Cortex_M4/Src/
+
+    - name: Compile Kernel Sources
+      run: |
+        arm-none-eabi-gcc -c -mcpu=cortex-m4 -mthumb -Wall -Wextra -O2 -IInc -IPort/Cortex_M4/Inc Src/*.c Port/Cortex_M4/Src/*.c

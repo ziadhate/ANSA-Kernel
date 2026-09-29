@@ -1,0 +1,25 @@
+var searchData=
+[
+  ['mailbox_20h_20tt_20tt_20inc_20notification_20h_20tt_0',['C. Mailbox &amp; Notifications (&lt;tt&gt;Inc/mailbox.h&lt;/tt&gt;, &lt;tt&gt;Inc/Notification.h&lt;/tt&gt;)',['../md_Docs_2API__REFERENCE.html#autotoc_md13',1,'']]],
+  ['mailbox_20notifications_20tt_20inc_20mailbox_20h_20tt_20tt_20inc_20notification_20h_20tt_1',['C. Mailbox &amp; Notifications (&lt;tt&gt;Inc/mailbox.h&lt;/tt&gt;, &lt;tt&gt;Inc/Notification.h&lt;/tt&gt;)',['../md_Docs_2API__REFERENCE.html#autotoc_md13',1,'']]],
+  ['mailbox_2eh_2',['mailbox.h',['../mailbox_8h.html',1,'']]],
+  ['mailbox_5fempty_3',['MAILBOX_EMPTY',['../mailbox_8h.html#a01494acbd407b2bd6ff10976f92f578ea9e22537c8a80d9a33cc1dac22aaccb53',1,'mailbox.h']]],
+  ['mailbox_5finit_5ffailed_4',['MAILBOX_INIT_FAILED',['../mailbox_8h.html#a01494acbd407b2bd6ff10976f92f578ea98dc099a0ccc1926379bda32c5d56ed7',1,'mailbox.h']]],
+  ['mailbox_5finit_5fsucceed_5',['MAILBOX_INIT_SUCCEED',['../mailbox_8h.html#a01494acbd407b2bd6ff10976f92f578ea1b66982e89ef77d83904017f804c2b84',1,'mailbox.h']]],
+  ['mailbox_5fmax_5fitem_5fsize_6',['MAILBOX_MAX_ITEM_SIZE',['../mailbox_8h.html#afea935690a36f40e81d40e0abe2449b1',1,'mailbox.h']]],
+  ['mailbox_5fok_7',['MAILBOX_OK',['../mailbox_8h.html#a01494acbd407b2bd6ff10976f92f578ea6c86cbc2f93e72b566ce545e33dc5fb9',1,'mailbox.h']]],
+  ['mailbox_5fstatus_5ft_8',['mailbox_status_t',['../mailbox_8h.html#a01494acbd407b2bd6ff10976f92f578e',1,'mailbox.h']]],
+  ['main_20components_9',['Main Components',['../md_Docs_2architecture_2ARCHITECTURE.html#autotoc_md16',1,'']]],
+  ['management_20priority_20inheritance_20tt_20inc_20mutex_20h_20tt_10',['B. Mutex Management &amp; Priority Inheritance (&lt;tt&gt;Inc/mutex.h&lt;/tt&gt;)',['../md_Docs_2API__REFERENCE.html#autotoc_md12',1,'']]],
+  ['management_20tt_20inc_20queue_20h_20tt_11',['A. Queue Management (&lt;tt&gt;Inc/queue.h&lt;/tt&gt;)',['../md_Docs_2API__REFERENCE.html#autotoc_md11',1,'']]],
+  ['max_5fcount_12',['max_count',['../structkernel__sem__t.html#a7e5dffe1a8dbc41a70c99204dbce385c',1,'kernel_sem_t']]],
+  ['max_5ftasks_13',['max_tasks',['../kernel__config_8h.html#aac747bed84189f8cfa509b94d488e622',1,'MAX_TASKS:&#160;kernel_config.h'],['../task_8h.html#aac747bed84189f8cfa509b94d488e622',1,'MAX_TASKS:&#160;task.h']]],
+  ['mutex_20h_20tt_14',['B. Mutex Management &amp; Priority Inheritance (&lt;tt&gt;Inc/mutex.h&lt;/tt&gt;)',['../md_Docs_2API__REFERENCE.html#autotoc_md12',1,'']]],
+  ['mutex_20management_20priority_20inheritance_20tt_20inc_20mutex_20h_20tt_15',['B. Mutex Management &amp; Priority Inheritance (&lt;tt&gt;Inc/mutex.h&lt;/tt&gt;)',['../md_Docs_2API__REFERENCE.html#autotoc_md12',1,'']]],
+  ['mutex_2eh_16',['mutex.h',['../mutex_8h.html',1,'']]],
+  ['mutex_5fbusy_17',['MUTEX_BUSY',['../mutex_8h.html#a1b0b8d6bfb1f1f75b51e13db6c63a5c3a46a10466fcdd9b3fe85a393a7b587496',1,'mutex.h']]],
+  ['mutex_5ferror_18',['MUTEX_ERROR',['../mutex_8h.html#a1b0b8d6bfb1f1f75b51e13db6c63a5c3a5afccc70ff325f66b71defeb0036c526',1,'mutex.h']]],
+  ['mutex_5fstatus_5ft_19',['mutex_status_t',['../mutex_8h.html#a1b0b8d6bfb1f1f75b51e13db6c63a5c3',1,'mutex.h']]],
+  ['mutex_5fsuccess_20',['MUTEX_SUCCESS',['../mutex_8h.html#a1b0b8d6bfb1f1f75b51e13db6c63a5c3a9036f3840a5b2aaae44ce735bfa168c7',1,'mutex.h']]],
+  ['mutex_5ftimeout_21',['MUTEX_TIMEOUT',['../mutex_8h.html#a1b0b8d6bfb1f1f75b51e13db6c63a5c3afb1fcac7bd57390bf1a12bb57aa21efe',1,'mutex.h']]]
+];

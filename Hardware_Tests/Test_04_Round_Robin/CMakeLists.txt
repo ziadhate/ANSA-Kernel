@@ -65,8 +65,21 @@ add_executable(Test_04_Round_Robin.elf
     ../../Src/queue.c
     ../../Src/mutex.c
     ../../Src/semaphore.c
+    ../../Src/watchdog.c
+    ../../Src/watchdog_port.c
 
     ../../Port/Cortex_M4/Src/port.c
+)
+
+# ============================================================
+# Test-specific small-memory configuration
+# STM32F103C4 = 6 KB RAM
+# ============================================================
+
+target_compile_definitions(Test_04_Round_Robin.elf PRIVATE
+    MAX_TASKS=6
+    KERNEL_STACK_POOL_SIZE=1024U
+    TASK_STACK_MIN_WORDS=32U
 )
 
 # ============================================================

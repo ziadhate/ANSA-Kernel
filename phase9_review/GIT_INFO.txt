@@ -1,0 +1,32 @@
+=== GIT STATUS ===
+ M Inc/mutex.h
+ M Inc/queue.h
+ M Src/mailbox.c
+ M Src/mutex.c
+ M Src/queue.c
+?? .github/
+?? CHANGELOG.md
+?? Docs/
+?? Doxyfile
+?? Inc/kernel_config.h
+?? phase5_sources.txt
+?? phase9_review/
+
+=== CURRENT BRANCH ===
+hardware-tests-only
+
+=== LAST COMMITS ===
+31dc48c Add hardware tests
+042cbb4 Added fsm_task.c & fsm_task.h for integration
+a1b1aa2 Add watchdog_port.h implementation
+c8b067f Add watchdog_port.h implementation
+82f1a01 Added new implementation of queue send and receive
+9484e2c Remove wrong Makefile and startup file
+e2d1878 Add mailbox support and update task module
+3c4ebb9 Done the corrections regarding the watchdog implementation
+9eae213 Added watchdog implementation
+54c8680 Remove obsolete testing files
+
+=== REMOTE ===
+origin	https://github.com/itsaxelc/Kernel.git (fetch)
+origin	https://github.com/itsaxelc/Kernel.git (push)

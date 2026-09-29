@@ -1,0 +1,10 @@
+PROJECT_NAME           = "ANSA RTOS Kernel"
+PROJECT_NUMBER         = "v1.0.0-Production"
+OUTPUT_DIRECTORY       = "Docs/doxygen"
+INPUT                  = Inc/ Port/Cortex_M4/Inc/ Docs/
+FILE_PATTERNS          = *.h *.md
+RECURSIVE              = YES
+GENERATE_HTML          = YES
+GENERATE_LATEX         = NO
+OPTIMIZE_OUTPUT_FOR_C  = YES
+EXTRACT_ALL            = YES

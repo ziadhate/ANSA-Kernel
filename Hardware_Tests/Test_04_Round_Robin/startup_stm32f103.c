@@ -1,5 +1,7 @@
 #include <stdint.h>
 
+uint32_t SystemCoreClock = 8000000U;
+
 /* Linker symbols */
 extern uint32_t _estack;
 extern uint32_t _sidata;

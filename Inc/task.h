@@ -5,13 +5,31 @@
 #include<stddef.h>
 
 /* Maximum number of tasks that can exist simultaneously */
+#ifndef MAX_TASKS
+#ifndef MAX_TASKS
+#ifndef MAX_TASKS
 #define MAX_TASKS 20
+#endif
+#endif
+#endif
 
 /* Total size of the memory pool dedicated to task stacks, in words */
+#ifndef KERNEL_STACK_POOL_SIZE
+#ifndef KERNEL_STACK_POOL_SIZE
+#ifndef KERNEL_STACK_POOL_SIZE
 #define KERNEL_STACK_POOL_SIZE  8192U
+#endif
+#endif
+#endif
 
 /* Minimum stack size allowed for a task, in words */
+#ifndef TASK_STACK_MIN_WORDS
+#ifndef TASK_STACK_MIN_WORDS
+#ifndef TASK_STACK_MIN_WORDS
 #define TASK_STACK_MIN_WORDS    32
+#endif
+#endif
+#endif
 
 // Possible states of a task
 typedef enum {

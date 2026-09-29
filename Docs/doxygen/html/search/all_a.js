@@ -1,0 +1,27 @@
+var searchData=
+[
+  ['idle_5ftask_5fcreate_0',['idle_task_create',['../task_8h.html#a28c26c2cbde76031afafc4669ead6aeb',1,'task.h']]],
+  ['inc_20mailbox_20h_20tt_20tt_20inc_20notification_20h_20tt_1',['C. Mailbox &amp; Notifications (&lt;tt&gt;Inc/mailbox.h&lt;/tt&gt;, &lt;tt&gt;Inc/Notification.h&lt;/tt&gt;)',['../md_Docs_2API__REFERENCE.html#autotoc_md13',1,'']]],
+  ['inc_20mutex_20h_20tt_2',['B. Mutex Management &amp; Priority Inheritance (&lt;tt&gt;Inc/mutex.h&lt;/tt&gt;)',['../md_Docs_2API__REFERENCE.html#autotoc_md12',1,'']]],
+  ['inc_20queue_20h_20tt_3',['A. Queue Management (&lt;tt&gt;Inc/queue.h&lt;/tt&gt;)',['../md_Docs_2API__REFERENCE.html#autotoc_md11',1,'']]],
+  ['inheritance_20tt_20inc_20mutex_20h_20tt_4',['B. Mutex Management &amp; Priority Inheritance (&lt;tt&gt;Inc/mutex.h&lt;/tt&gt;)',['../md_Docs_2API__REFERENCE.html#autotoc_md12',1,'']]],
+  ['interrupt_20service_20routine_20isr_20rules_20guidelines_5',['1. Interrupt Service Routine (ISR) Rules &amp; Guidelines',['../md_Docs_2API__REFERENCE.html#autotoc_md9',1,'']]],
+  ['ipc_6',['IPC',['../md_Docs_2architecture_2ARCHITECTURE.html#autotoc_md21',1,'']]],
+  ['ipc_20apis_7',['IPC APIs',['../md_Docs_2api_2API__REFERENCE.html#autotoc_md5',1,'']]],
+  ['isr_8',['Scheduling From ISR',['../md_Docs_2architecture_2ISR__RULES.html#autotoc_md29',1,'']]],
+  ['isr_20rules_9',['ISR Rules',['../md_Docs_2architecture_2ISR__RULES.html',1,'']]],
+  ['isr_20rules_20guidelines_10',['1. Interrupt Service Routine (ISR) Rules &amp; Guidelines',['../md_Docs_2API__REFERENCE.html#autotoc_md9',1,'']]],
+  ['isr_20safe_20apis_11',['ISR-Safe APIs',['../md_Docs_2architecture_2ISR__RULES.html#autotoc_md28',1,'']]],
+  ['isr_5frules_2emd_12',['ISR_RULES.md',['../ISR__RULES_8md.html',1,'']]],
+  ['item_5fsize_13',['item_size',['../structkernel__mailbox__t.html#a4aca10184db9d7aa1a54533771020dcb',1,'kernel_mailbox_t::item_size'],['../structkernel__queue__t.html#a883d23b417252c33fcd7b26716787165',1,'kernel_queue_t::item_size']]],
+  ['iwdg_5fbase_14',['IWDG_BASE',['../watchdog__port_8h.html#a8543ee4997296af5536b007cd4748f55',1,'watchdog_port.h']]],
+  ['iwdg_5fkey_5fenable_15',['IWDG_KEY_ENABLE',['../watchdog__port_8h.html#a493295d56bb62752982234755612386f',1,'watchdog_port.h']]],
+  ['iwdg_5fkey_5freload_16',['IWDG_KEY_RELOAD',['../watchdog__port_8h.html#a33abf7b7c76dfda6b6380448a1d28966',1,'watchdog_port.h']]],
+  ['iwdg_5fkey_5funlock_17',['IWDG_KEY_UNLOCK',['../watchdog__port_8h.html#ac4a7ce005628cb4efc9273f1d759a413',1,'watchdog_port.h']]],
+  ['iwdg_5fkr_18',['IWDG_KR',['../watchdog__port_8h.html#a6ba6525190b56c5975d9c644064895cd',1,'watchdog_port.h']]],
+  ['iwdg_5fpr_19',['IWDG_PR',['../watchdog__port_8h.html#af458d1517b28023a982c3753c476f987',1,'watchdog_port.h']]],
+  ['iwdg_5fprescaler_20',['IWDG_PRESCALER',['../watchdog__port_8h.html#ab61fb6b3a637eba930702a2384ef4c5f',1,'watchdog_port.h']]],
+  ['iwdg_5freload_5fvalue_21',['IWDG_RELOAD_VALUE',['../watchdog__port_8h.html#a66f83a092a913b93c1199c5effb3c8ad',1,'watchdog_port.h']]],
+  ['iwdg_5frlr_22',['IWDG_RLR',['../watchdog__port_8h.html#a1f2276cc41e9f7a588b645842b646d80',1,'watchdog_port.h']]],
+  ['iwdg_5fsr_23',['IWDG_SR',['../watchdog__port_8h.html#a363ed22b5f75721a6053d6777cda1c51',1,'watchdog_port.h']]]
+];
